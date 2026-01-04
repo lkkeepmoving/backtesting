@@ -95,6 +95,22 @@ def get_tradestation_config() -> dict:
     }
 
 
+def sanitize_filename(symbol: str) -> str:
+    """
+    Sanitize symbol name for use as filename
+    Replaces special characters that might cause issues
+
+    Args:
+        symbol: Original symbol name (e.g., $VIX.X)
+
+    Returns:
+        Sanitized filename (e.g., VIX_X)
+    """
+    # Remove $ prefix and replace . with _
+    filename = symbol.replace('$', '').replace('.', '_')
+    return filename
+
+
 def fetch_and_save_data(client: TradeStationClient, symbol: str, bar_count: int,
                         storage_dir: Path) -> bool:
     """
@@ -118,8 +134,11 @@ def fetch_and_save_data(client: TradeStationClient, symbol: str, bar_count: int,
             logger.error(f"No data retrieved for {symbol}")
             return False
 
+        # Sanitize symbol for filename
+        sanitized_name = sanitize_filename(symbol)
+
         # Define output path
-        output_path = storage_dir / f"{symbol}.csv"
+        output_path = storage_dir / f"{sanitized_name}.csv"
 
         # Remove old file if exists
         if output_path.exists():
@@ -128,7 +147,7 @@ def fetch_and_save_data(client: TradeStationClient, symbol: str, bar_count: int,
 
         # Save to CSV
         df.to_csv(output_path, index=False)
-        logger.info(f"✓ Saved {len(df)} bars to {output_path}")
+        logger.info(f"✓ Saved {len(df)} bars to {output_path} (symbol: {symbol})")
 
         return True
 
