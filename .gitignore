@@ -26,5 +26,10 @@ Thumbs.db
 # Data files (can be large)
 data/storage/*.csv
 
+# API tokens (credentials)
+data/.tradestation_tokens
+data/.schwab_tokens
+
 # Report files (generated)
 reports/*.txt
+reports/*.csv

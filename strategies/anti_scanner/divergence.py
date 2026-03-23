@@ -1,0 +1,268 @@
+"""
+Core Divergence Detection Algorithm
+
+Detects bearish and bullish divergences between price and an indicator
+(RSI or MACD). Supports 2-divergence (classic) and 3-divergence (triple).
+
+The same algorithm is used for both RSI and MACD divergence — only the
+indicator values and threshold interpretation differ.
+"""
+
+import numpy as np
+from typing import List, Dict, Any, Optional
+
+
+def find_pivot_highs(values: np.ndarray, start: int, end: int,
+                     pivot_lookback: int) -> List[int]:
+    """
+    Find all pivot highs in values[start:end+1].
+
+    A bar j is a pivot high if values[j] >= values[j-k] and values[j] >= values[j+k]
+    for all k in 1..pivot_lookback.
+
+    Args:
+        values: Indicator values array
+        start: Start index (inclusive)
+        end: End index (inclusive)
+        pivot_lookback: Bars on each side to confirm pivot
+
+    Returns:
+        List of indices that are pivot highs
+    """
+    pivots = []
+    # Ensure we have room for pivot_lookback on both sides
+    scan_start = max(start, pivot_lookback)
+    scan_end = min(end, len(values) - 1 - pivot_lookback)
+
+    for j in range(scan_start, scan_end + 1):
+        if np.isnan(values[j]):
+            continue
+        is_pivot = True
+        for k in range(1, pivot_lookback + 1):
+            if np.isnan(values[j - k]) or np.isnan(values[j + k]):
+                is_pivot = False
+                break
+            if values[j] < values[j - k] or values[j] < values[j + k]:
+                is_pivot = False
+                break
+        if is_pivot:
+            pivots.append(j)
+
+    return pivots
+
+
+def find_pivot_lows(values: np.ndarray, start: int, end: int,
+                    pivot_lookback: int) -> List[int]:
+    """
+    Find all pivot lows in values[start:end+1].
+
+    A bar j is a pivot low if values[j] <= values[j-k] and values[j] <= values[j+k]
+    for all k in 1..pivot_lookback.
+    """
+    pivots = []
+    scan_start = max(start, pivot_lookback)
+    scan_end = min(end, len(values) - 1 - pivot_lookback)
+
+    for j in range(scan_start, scan_end + 1):
+        if np.isnan(values[j]):
+            continue
+        is_pivot = True
+        for k in range(1, pivot_lookback + 1):
+            if np.isnan(values[j - k]) or np.isnan(values[j + k]):
+                is_pivot = False
+                break
+            if values[j] > values[j - k] or values[j] > values[j + k]:
+                is_pivot = False
+                break
+        if is_pivot:
+            pivots.append(j)
+
+    return pivots
+
+
+def detect_bearish_divergence(
+    current_bar: int,
+    close: np.ndarray,
+    indicator: np.ndarray,
+    lookback_window: int,
+    threshold: float,
+    pivot_lookback: int,
+    min_separation: int,
+    divergence_count: int,
+) -> List[Dict[str, Any]]:
+    """
+    Detect bearish divergence: price makes higher highs while indicator makes lower highs.
+    Signals uptrend exhaustion (used for short setups).
+
+    Args:
+        current_bar: The bar index being evaluated
+        close: Close price array
+        indicator: Indicator values array (RSI or MACD fast line)
+        lookback_window: Bars to look back from current_bar
+        threshold: Upper threshold (RSI value or MACD percentile)
+        pivot_lookback: Bars on each side to confirm a pivot
+        min_separation: Minimum bars between two pivots
+        divergence_count: 2 for classic, 3 for triple divergence
+
+    Returns:
+        List of divergence records. Each record contains pivot details.
+    """
+    window_start = max(0, current_bar - lookback_window)
+    window_end = current_bar
+
+    # Early exit: check if ANY indicator value in window >= threshold
+    window_values = indicator[window_start:window_end + 1]
+    valid_values = window_values[~np.isnan(window_values)]
+    if len(valid_values) == 0 or np.max(valid_values) < threshold:
+        return []
+
+    # Find all indicator pivot highs in the window
+    pivots = find_pivot_highs(indicator, window_start, window_end, pivot_lookback)
+    if len(pivots) < divergence_count:
+        return []
+
+    # At least one pivot must have indicator >= threshold
+    qualifying = [p for p in pivots if indicator[p] >= threshold]
+    if not qualifying:
+        return []
+
+    divergences = []
+
+    if divergence_count == 2:
+        for i_a in range(len(pivots)):
+            for i_b in range(i_a + 1, len(pivots)):
+                a, b = pivots[i_a], pivots[i_b]
+                if (b - a) < min_separation:
+                    continue
+                # At least one must be qualifying
+                if a not in qualifying and b not in qualifying:
+                    continue
+                # Price higher high AND indicator lower high
+                if close[b] > close[a] and indicator[b] < indicator[a]:
+                    divergences.append({
+                        'type': 'bearish',
+                        'count': 2,
+                        'pivot_bars': [a, b],
+                        'pivot_indicator_values': [float(indicator[a]), float(indicator[b])],
+                        'pivot_close_values': [float(close[a]), float(close[b])],
+                        'divergence_end_bar': b,
+                    })
+
+    elif divergence_count == 3:
+        for i_a in range(len(pivots)):
+            for i_b in range(i_a + 1, len(pivots)):
+                if (pivots[i_b] - pivots[i_a]) < min_separation:
+                    continue
+                for i_c in range(i_b + 1, len(pivots)):
+                    a, b, c = pivots[i_a], pivots[i_b], pivots[i_c]
+                    if (c - b) < min_separation:
+                        continue
+                    if a not in qualifying and b not in qualifying and c not in qualifying:
+                        continue
+                    # Progressively higher highs in price, lower highs in indicator
+                    if (close[a] < close[b] < close[c] and
+                            indicator[a] > indicator[b] > indicator[c]):
+                        divergences.append({
+                            'type': 'bearish',
+                            'count': 3,
+                            'pivot_bars': [a, b, c],
+                            'pivot_indicator_values': [float(indicator[a]),
+                                                       float(indicator[b]),
+                                                       float(indicator[c])],
+                            'pivot_close_values': [float(close[a]),
+                                                   float(close[b]),
+                                                   float(close[c])],
+                            'divergence_end_bar': c,
+                        })
+
+    return divergences
+
+
+def detect_bullish_divergence(
+    current_bar: int,
+    close: np.ndarray,
+    indicator: np.ndarray,
+    lookback_window: int,
+    threshold: float,
+    pivot_lookback: int,
+    min_separation: int,
+    divergence_count: int,
+) -> List[Dict[str, Any]]:
+    """
+    Detect bullish divergence: price makes lower lows while indicator makes higher lows.
+    Signals downtrend exhaustion (used for long setups).
+
+    Args:
+        Same as detect_bearish_divergence, but threshold is the LOWER threshold.
+
+    Returns:
+        List of divergence records.
+    """
+    window_start = max(0, current_bar - lookback_window)
+    window_end = current_bar
+
+    # Early exit: check if ANY indicator value in window <= threshold
+    window_values = indicator[window_start:window_end + 1]
+    valid_values = window_values[~np.isnan(window_values)]
+    if len(valid_values) == 0 or np.min(valid_values) > threshold:
+        return []
+
+    # Find all indicator pivot lows in the window
+    pivots = find_pivot_lows(indicator, window_start, window_end, pivot_lookback)
+    if len(pivots) < divergence_count:
+        return []
+
+    # At least one pivot must have indicator <= threshold
+    qualifying = [p for p in pivots if indicator[p] <= threshold]
+    if not qualifying:
+        return []
+
+    divergences = []
+
+    if divergence_count == 2:
+        for i_a in range(len(pivots)):
+            for i_b in range(i_a + 1, len(pivots)):
+                a, b = pivots[i_a], pivots[i_b]
+                if (b - a) < min_separation:
+                    continue
+                if a not in qualifying and b not in qualifying:
+                    continue
+                # Price lower low AND indicator higher low
+                if close[b] < close[a] and indicator[b] > indicator[a]:
+                    divergences.append({
+                        'type': 'bullish',
+                        'count': 2,
+                        'pivot_bars': [a, b],
+                        'pivot_indicator_values': [float(indicator[a]), float(indicator[b])],
+                        'pivot_close_values': [float(close[a]), float(close[b])],
+                        'divergence_end_bar': b,
+                    })
+
+    elif divergence_count == 3:
+        for i_a in range(len(pivots)):
+            for i_b in range(i_a + 1, len(pivots)):
+                if (pivots[i_b] - pivots[i_a]) < min_separation:
+                    continue
+                for i_c in range(i_b + 1, len(pivots)):
+                    a, b, c = pivots[i_a], pivots[i_b], pivots[i_c]
+                    if (c - b) < min_separation:
+                        continue
+                    if a not in qualifying and b not in qualifying and c not in qualifying:
+                        continue
+                    # Progressively lower lows in price, higher lows in indicator
+                    if (close[a] > close[b] > close[c] and
+                            indicator[a] < indicator[b] < indicator[c]):
+                        divergences.append({
+                            'type': 'bullish',
+                            'count': 3,
+                            'pivot_bars': [a, b, c],
+                            'pivot_indicator_values': [float(indicator[a]),
+                                                       float(indicator[b]),
+                                                       float(indicator[c])],
+                            'pivot_close_values': [float(close[a]),
+                                                   float(close[b]),
+                                                   float(close[c])],
+                            'divergence_end_bar': c,
+                        })
+
+    return divergences

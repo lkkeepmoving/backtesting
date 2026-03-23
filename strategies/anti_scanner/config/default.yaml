@@ -1,0 +1,58 @@
+# =============================================================
+# Anti Pattern Scanner — Indicator Configuration
+# =============================================================
+# All parameters are configurable. Modify and re-run as needed.
+# Parameters with multiple values create a sweep — the scanner
+# tests all combinations and tags results accordingly.
+# =============================================================
+
+# --- Data ---
+data_bars: 500                  # Daily bars to pull per symbol
+
+# --- Phase 1: Divergence Detection ---
+
+# Shared divergence parameters
+divergence:
+  lookback_window: 40           # Bars to look back for divergence from current bar
+  pivot_lookback: 3             # Bars on each side to confirm a pivot high/low
+  min_separation: 5             # Minimum bars between two pivots in a divergence pair
+  divergence_counts: [2, 3]     # 2 = classic divergence, 3 = triple divergence
+
+# RSI Divergence
+rsi:
+  enabled: true
+  periods: [7, 14, 21]                        # RSI periods to sweep
+  thresholds:                                  # [upper, lower] pairs for short/long setups
+    - [70, 30]
+    - [80, 20]
+    - [90, 10]
+
+# Modified MACD Divergence
+macd:
+  enabled: true
+  fast_period: 3                # SMA fast period (fixed per Anti strategy definition)
+  slow_period: 10               # SMA slow period (fixed per Anti strategy definition)
+  signal_period: 16             # Signal line SMA period (fixed per Anti strategy definition)
+  divergence_source: "fast_line"  # Use MACD fast line (not histogram) for divergence
+  percentile_lookback: 252      # Bars for computing MACD percentile baseline
+  percentile_thresholds:        # [upper_percentile, lower_percentile] pairs
+    - [80, 20]
+    - [90, 10]
+    - [95, 5]
+
+# --- Phase 2: Counter-Trend Shock ---
+
+phase2:
+  window: 20                    # Max bars after divergence to scan for shock
+
+  shock_methods: ["sigma_spike", "price_pct_change"]  # Methods to test
+
+  sigma_spike:
+    thresholds: [2.0, 2.5, 3.0]      # Sigma multiples
+    lookback: 20                       # Bars for computing daily return std dev
+
+  price_pct_change:
+    thresholds: [0.02, 0.03, 0.05]   # Absolute pct change (2%, 3%, 5%)
+
+  macd_extreme:
+    lookback: 40                       # Bars to check for MACD new low/high
