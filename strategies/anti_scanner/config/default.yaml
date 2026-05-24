@@ -16,16 +16,14 @@ divergence:
   lookback_window: 40           # Bars to look back for divergence from current bar
   pivot_lookback: 3             # Bars on each side to confirm a pivot high/low
   min_separation: 5             # Minimum bars between two pivots in a divergence pair
-  divergence_counts: [2, 3]     # 2 = classic divergence, 3 = triple divergence
+  divergence_counts: [3]     # 2 = classic divergence, 3 = triple divergence. [2, 3]
 
 # RSI Divergence
 rsi:
   enabled: true
-  periods: [7, 14, 21]                        # RSI periods to sweep
+  periods: [7]                        # RSI periods to sweep. [7, 14, 21]
   thresholds:                                  # [upper, lower] pairs for short/long setups
     - [70, 30]
-    - [80, 20]
-    - [90, 10]
 
 # Modified MACD Divergence
 macd:
@@ -38,7 +36,6 @@ macd:
   percentile_thresholds:        # [upper_percentile, lower_percentile] pairs
     - [80, 20]
     - [90, 10]
-    - [95, 5]
 
 # --- Phase 2: Counter-Trend Shock ---
 
@@ -48,11 +45,11 @@ phase2:
   shock_methods: ["sigma_spike", "price_pct_change"]  # Methods to test
 
   sigma_spike:
-    thresholds: [2.0, 2.5, 3.0]      # Sigma multiples
+    thresholds: [2.5]      # Sigma multiples. [2.0, 2.5, 3.0] 
     lookback: 20                       # Bars for computing daily return std dev
 
   price_pct_change:
-    thresholds: [0.02, 0.03, 0.05]   # Absolute pct change (2%, 3%, 5%)
+    thresholds: [0.03, 0.05]   # Absolute pct change (2%, 3%, 5%)
 
   macd_extreme:
     lookback: 40                       # Bars to check for MACD new low/high

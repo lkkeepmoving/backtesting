@@ -80,6 +80,32 @@ def find_pivot_lows(values: np.ndarray, start: int, end: int,
     return pivots
 
 
+def _no_higher_between(indicator: np.ndarray, a: int, b: int, ref_value: float) -> bool:
+    """
+    Return True if no indicator value strictly between indices a and b
+    (exclusive) exceeds ref_value (ignoring NaNs).
+    Trivially True when there are no bars between a and b.
+    """
+    if b - a <= 1:
+        return True
+    segment = indicator[a + 1:b]
+    valid = segment[~np.isnan(segment)]
+    return len(valid) == 0 or float(np.max(valid)) <= ref_value
+
+
+def _no_lower_between(indicator: np.ndarray, a: int, b: int, ref_value: float) -> bool:
+    """
+    Return True if no indicator value strictly between indices a and b
+    (exclusive) falls below ref_value (ignoring NaNs).
+    Trivially True when there are no bars between a and b.
+    """
+    if b - a <= 1:
+        return True
+    segment = indicator[a + 1:b]
+    valid = segment[~np.isnan(segment)]
+    return len(valid) == 0 or float(np.min(valid)) >= ref_value
+
+
 def detect_bearish_divergence(
     current_bar: int,
     close: np.ndarray,
@@ -138,7 +164,9 @@ def detect_bearish_divergence(
                 if a not in qualifying and b not in qualifying:
                     continue
                 # Price higher high AND indicator lower high
-                if close[b] > close[a] and indicator[b] < indicator[a]:
+                # Guard: no bar between a and b may have indicator > indicator[a]
+                if (close[b] > close[a] and indicator[b] < indicator[a] and
+                        _no_higher_between(indicator, a, b, indicator[a])):
                     divergences.append({
                         'type': 'bearish',
                         'count': 2,
@@ -157,11 +185,17 @@ def detect_bearish_divergence(
                     a, b, c = pivots[i_a], pivots[i_b], pivots[i_c]
                     if (c - b) < min_separation:
                         continue
-                    if a not in qualifying and b not in qualifying and c not in qualifying:
+                    # D1 and D2 must both be overbought (D1 qualifies implicitly
+                    # since indicator[a] > indicator[b] >= threshold)
+                    if b not in qualifying:
                         continue
                     # Progressively higher highs in price, lower highs in indicator
+                    # Guard: no bar between a↔b may exceed indicator[a],
+                    #         no bar between b↔c may exceed indicator[b]
                     if (close[a] < close[b] < close[c] and
-                            indicator[a] > indicator[b] > indicator[c]):
+                            indicator[a] > indicator[b] > indicator[c] and
+                            _no_higher_between(indicator, a, b, indicator[a]) and
+                            _no_higher_between(indicator, b, c, indicator[b])):
                         divergences.append({
                             'type': 'bearish',
                             'count': 3,
@@ -228,7 +262,9 @@ def detect_bullish_divergence(
                 if a not in qualifying and b not in qualifying:
                     continue
                 # Price lower low AND indicator higher low
-                if close[b] < close[a] and indicator[b] > indicator[a]:
+                # Guard: no bar between a and b may have indicator < indicator[a]
+                if (close[b] < close[a] and indicator[b] > indicator[a] and
+                        _no_lower_between(indicator, a, b, indicator[a])):
                     divergences.append({
                         'type': 'bullish',
                         'count': 2,
@@ -247,11 +283,17 @@ def detect_bullish_divergence(
                     a, b, c = pivots[i_a], pivots[i_b], pivots[i_c]
                     if (c - b) < min_separation:
                         continue
-                    if a not in qualifying and b not in qualifying and c not in qualifying:
+                    # D1 and D2 must both be oversold (D1 qualifies implicitly
+                    # since indicator[a] < indicator[b] <= threshold)
+                    if b not in qualifying:
                         continue
                     # Progressively lower lows in price, higher lows in indicator
+                    # Guard: no bar between a↔b may fall below indicator[a],
+                    #         no bar between b↔c may fall below indicator[b]
                     if (close[a] > close[b] > close[c] and
-                            indicator[a] < indicator[b] < indicator[c]):
+                            indicator[a] < indicator[b] < indicator[c] and
+                            _no_lower_between(indicator, a, b, indicator[a]) and
+                            _no_lower_between(indicator, b, c, indicator[b])):
                         divergences.append({
                             'type': 'bullish',
                             'count': 3,

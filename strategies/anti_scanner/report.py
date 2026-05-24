@@ -31,8 +31,8 @@ def _format_config_label(occ: Dict[str, Any]) -> str:
     return f"{indicator}({period}), threshold {threshold}, {div_count}-divergence, {shock_label}"
 
 
-def _format_divergence(occ: Dict[str, Any], dates: np.ndarray) -> List[str]:
-    """Format divergence pivot details."""
+def _format_divergence(occ: Dict[str, Any], dates: np.ndarray, shock_bar: int) -> List[str]:
+    """Format divergence pivot details with bars-to-shock distance."""
     lines = []
     p1 = occ['phase1']
     div = p1['divergence']
@@ -42,6 +42,7 @@ def _format_divergence(occ: Dict[str, Any], dates: np.ndarray) -> List[str]:
         date = dates[bar] if bar < len(dates) else "N/A"
         ind_val = div['pivot_indicator_values'][i]
         close_val = div['pivot_close_values'][i]
+        bars_to_shock = shock_bar - bar
 
         if i == 0:
             role = "(anchor)"
@@ -53,9 +54,9 @@ def _format_divergence(occ: Dict[str, Any], dates: np.ndarray) -> List[str]:
         if indicator_type == "MACD" and 'macd_raw_values' in p1:
             raw = p1['macd_raw_values'][i]
             raw_str = f"  MACD={raw:.4f}" if raw is not None else ""
-            lines.append(f"       {date}  pctl={ind_val:.0f}{raw_str}  Close=${close_val:.2f}   {role}")
+            lines.append(f"       {date}  pctl={ind_val:.0f}{raw_str}  Close=${close_val:.2f}   {role}  [{bars_to_shock} bars to shock]")
         else:
-            lines.append(f"       {date}  {indicator_type}={ind_val:.1f}  Close=${close_val:.2f}   {role}")
+            lines.append(f"       {date}  {indicator_type}={ind_val:.1f}  Close=${close_val:.2f}   {role}  [{bars_to_shock} bars to shock]")
 
     return lines
 
@@ -165,31 +166,27 @@ def generate_report(
             key = (o['phase2']['shock_bar'], o['direction'])
             grouped[key].append(o)
 
-        sorted_keys = sorted(grouped.keys(), key=lambda k: k[0])
+        sorted_keys = sorted(grouped.keys(), key=lambda k: k[0], reverse=True)
         lines.append(f"\n{symbol} -- {len(sorted_keys)} occurrences")
         lines.append("-" * 65)
 
         for idx, key in enumerate(sorted_keys, 1):
             shock_bar, occ_direction = key
             group = grouped[key]
-            representative = group[0]
 
             shock_date = dates[shock_bar] if dates is not None and shock_bar < len(dates) else "N/A"
-            p2 = representative['phase2']
+            p2 = group[0]['phase2']
 
             lines.append(f"\n  #{idx} [{occ_direction.upper()}] Shock date: {shock_date}")
 
-            # List all configs that triggered
+            # List all configs that triggered, each with its own divergence details
             lines.append("     Triggered by configs:")
             for o in group:
                 label = _format_config_label(o)
                 lines.append(f"       - {label}")
-
-            # Divergence details (from representative)
-            lines.append("     Divergence:")
-            div_lines = _format_divergence(representative, dates)
-            for dl in div_lines:
-                lines.append(dl)
+                div_lines = _format_divergence(o, dates, shock_bar)
+                for dl in div_lines:
+                    lines.append(dl)
 
             # Shock details
             lines.append("     Shock:")
@@ -232,7 +229,7 @@ def generate_report(
             by_dir[d].append(shock_date)
 
         for d in sorted(by_dir.keys()):
-            shock_dates = sorted(by_dir[d])
+            shock_dates = sorted(by_dir[d], reverse=True)
             lines.append(f"{symbol:<10} {d.upper():<12} {len(shock_dates):<8} {', '.join(shock_dates)}")
 
     if symbols_with_zero:
