@@ -42,6 +42,7 @@ def run_phase1(
     pivot_lookback = div_config['pivot_lookback']
     min_separation = div_config['min_separation']
     divergence_counts = div_config['divergence_counts']
+    strict_threshold = div_config.get('strict_threshold', False)
 
     detect_fn = (detect_bearish_divergence if direction == "short"
                  else detect_bullish_divergence)
@@ -68,6 +69,7 @@ def run_phase1(
                         pivot_lookback=pivot_lookback,
                         min_separation=min_separation,
                         divergence_count=div_count,
+                        strict_threshold=strict_threshold,
                     )
 
                     for div in divergences:
@@ -103,6 +105,7 @@ def run_phase1(
                     raw_indicator=macd_line,  # pivots, divergence direction, and
                                               # between-checks use raw MACD to avoid
                                               # rolling-percentile floor/ceiling artefacts
+                    strict_threshold=strict_threshold,
                 )
 
                 for div in divergences:

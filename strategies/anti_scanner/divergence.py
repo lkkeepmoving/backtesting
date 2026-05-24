@@ -116,6 +116,7 @@ def detect_bearish_divergence(
     min_separation: int,
     divergence_count: int,
     raw_indicator: Optional[np.ndarray] = None,
+    strict_threshold: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Detect bearish divergence: price makes higher highs while indicator makes lower highs.
@@ -138,6 +139,11 @@ def detect_bearish_divergence(
                        When provided, `indicator` is used only for threshold
                        qualification — preventing rolling-window percentile
                        artefacts from contaminating the divergence logic.
+        strict_threshold: If True, every pivot in the pattern must qualify
+                          (i.e. indicator >= threshold). If False (default),
+                          only the anchor (2-point) or anchor+D2 (3-point)
+                          must qualify; the final divergent pivot may be inside
+                          the threshold.
 
     Returns:
         List of divergence records. Each record contains pivot details.
@@ -173,9 +179,13 @@ def detect_bearish_divergence(
                 a, b = pivots[i_a], pivots[i_b]
                 if (b - a) < min_separation:
                     continue
-                # At least one must be qualifying
-                if a not in qualifying and b not in qualifying:
-                    continue
+                # Threshold qualification gate
+                if strict_threshold:
+                    if a not in qualifying or b not in qualifying:
+                        continue
+                else:
+                    if a not in qualifying and b not in qualifying:
+                        continue
                 # Price higher high AND ind lower high
                 # Guard: no bar between a and b may have ind > ind[a]
                 if (close[b] > close[a] and ind[b] < ind[a] and
@@ -198,10 +208,14 @@ def detect_bearish_divergence(
                     a, b, c = pivots[i_a], pivots[i_b], pivots[i_c]
                     if (c - b) < min_separation:
                         continue
-                    # D1 and D2 must both be overbought (D1 qualifies implicitly
-                    # since ind[a] > ind[b] and indicator[b] >= threshold)
-                    if b not in qualifying:
-                        continue
+                    # Threshold qualification gate
+                    if strict_threshold:
+                        if a not in qualifying or b not in qualifying or c not in qualifying:
+                            continue
+                    else:
+                        # Default: D1+D2 must qualify (D3 may be inside threshold)
+                        if b not in qualifying:
+                            continue
                     # Progressively higher highs in price, lower highs in ind
                     # Guard: no bar between a↔b may exceed ind[a],
                     #         no bar between b↔c may exceed ind[b]
@@ -235,6 +249,7 @@ def detect_bullish_divergence(
     min_separation: int,
     divergence_count: int,
     raw_indicator: Optional[np.ndarray] = None,
+    strict_threshold: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Detect bullish divergence: price makes lower lows while indicator makes higher lows.
@@ -245,6 +260,7 @@ def detect_bullish_divergence(
         raw_indicator: See detect_bearish_divergence. When provided (MACD path),
                        used for pivot detection, divergence direction, and
                        between-checks instead of `indicator`.
+        strict_threshold: If True, every pivot must qualify (indicator <= threshold).
 
     Returns:
         List of divergence records.
@@ -278,8 +294,13 @@ def detect_bullish_divergence(
                 a, b = pivots[i_a], pivots[i_b]
                 if (b - a) < min_separation:
                     continue
-                if a not in qualifying and b not in qualifying:
-                    continue
+                # Threshold qualification gate
+                if strict_threshold:
+                    if a not in qualifying or b not in qualifying:
+                        continue
+                else:
+                    if a not in qualifying and b not in qualifying:
+                        continue
                 # Price lower low AND ind higher low
                 # Guard: no bar between a and b may have ind < ind[a]
                 if (close[b] < close[a] and ind[b] > ind[a] and
@@ -302,10 +323,14 @@ def detect_bullish_divergence(
                     a, b, c = pivots[i_a], pivots[i_b], pivots[i_c]
                     if (c - b) < min_separation:
                         continue
-                    # D1 and D2 must both be oversold (D1 qualifies implicitly
-                    # since ind[a] < ind[b] and indicator[b] <= threshold)
-                    if b not in qualifying:
-                        continue
+                    # Threshold qualification gate
+                    if strict_threshold:
+                        if a not in qualifying or b not in qualifying or c not in qualifying:
+                            continue
+                    else:
+                        # Default: D1+D2 must qualify (D3 may be inside threshold)
+                        if b not in qualifying:
+                            continue
                     # Progressively lower lows in price, higher lows in ind
                     # Guard: no bar between a↔b may fall below ind[a],
                     #         no bar between b↔c may fall below ind[b]

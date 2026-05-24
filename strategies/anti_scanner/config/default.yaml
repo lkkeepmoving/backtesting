@@ -16,7 +16,10 @@ divergence:
   lookback_window: 40           # Bars to look back for divergence from current bar
   pivot_lookback: 3             # Bars on each side to confirm a pivot high/low
   min_separation: 5             # Minimum bars between two pivots in a divergence pair
-  divergence_counts: [3]     # 2 = classic divergence, 3 = triple divergence. [2, 3]
+  divergence_counts: [3]        # 2 = classic divergence, 3 = triple divergence. [2, 3]
+  strict_threshold: false       # If true, ALL pivot points (D1…Dn) must be outside the
+                                # threshold, not just the anchor. e.g. for bearish RSI
+                                # with threshold=70: every pivot must have RSI >= 70.
 
 # RSI Divergence
 rsi:
