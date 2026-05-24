@@ -100,6 +100,9 @@ def run_phase1(
                     pivot_lookback=pivot_lookback,
                     min_separation=min_separation,
                     divergence_count=div_count,
+                    raw_indicator=macd_line,  # pivots, divergence direction, and
+                                              # between-checks use raw MACD to avoid
+                                              # rolling-percentile floor/ceiling artefacts
                 )
 
                 for div in divergences:

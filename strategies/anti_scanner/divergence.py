@@ -115,6 +115,7 @@ def detect_bearish_divergence(
     pivot_lookback: int,
     min_separation: int,
     divergence_count: int,
+    raw_indicator: Optional[np.ndarray] = None,
 ) -> List[Dict[str, Any]]:
     """
     Detect bearish divergence: price makes higher highs while indicator makes lower highs.
@@ -123,31 +124,43 @@ def detect_bearish_divergence(
     Args:
         current_bar: The bar index being evaluated
         close: Close price array
-        indicator: Indicator values array (RSI or MACD fast line)
+        indicator: Indicator values used for threshold qualification only when
+                   raw_indicator is provided (e.g. MACD percentile); otherwise
+                   used for all purposes (e.g. RSI values).
         lookback_window: Bars to look back from current_bar
         threshold: Upper threshold (RSI value or MACD percentile)
         pivot_lookback: Bars on each side to confirm a pivot
         min_separation: Minimum bars between two pivots
         divergence_count: 2 for classic, 3 for triple divergence
+        raw_indicator: Optional raw values (e.g. MACD fast line) used for pivot
+                       detection, divergence direction, and between-checks.
+                       When None, `indicator` is used for all purposes (RSI path).
+                       When provided, `indicator` is used only for threshold
+                       qualification — preventing rolling-window percentile
+                       artefacts from contaminating the divergence logic.
 
     Returns:
         List of divergence records. Each record contains pivot details.
     """
+    # ind: the values used for pivot detection, divergence direction, between-checks.
+    # For RSI this equals `indicator`; for MACD this is the raw fast line.
+    ind = raw_indicator if raw_indicator is not None else indicator
+
     window_start = max(0, current_bar - lookback_window)
     window_end = current_bar
 
-    # Early exit: check if ANY indicator value in window >= threshold
+    # Early exit: check if ANY indicator (threshold scale) value in window >= threshold
     window_values = indicator[window_start:window_end + 1]
     valid_values = window_values[~np.isnan(window_values)]
     if len(valid_values) == 0 or np.max(valid_values) < threshold:
         return []
 
-    # Find all indicator pivot highs in the window
-    pivots = find_pivot_highs(indicator, window_start, window_end, pivot_lookback)
+    # Find pivot highs on ind (raw values — avoids rolling-window percentile drift)
+    pivots = find_pivot_highs(ind, window_start, window_end, pivot_lookback)
     if len(pivots) < divergence_count:
         return []
 
-    # At least one pivot must have indicator >= threshold
+    # Threshold qualification uses indicator (percentile / RSI threshold scale)
     qualifying = [p for p in pivots if indicator[p] >= threshold]
     if not qualifying:
         return []
@@ -163,10 +176,10 @@ def detect_bearish_divergence(
                 # At least one must be qualifying
                 if a not in qualifying and b not in qualifying:
                     continue
-                # Price higher high AND indicator lower high
-                # Guard: no bar between a and b may have indicator > indicator[a]
-                if (close[b] > close[a] and indicator[b] < indicator[a] and
-                        _no_higher_between(indicator, a, b, indicator[a])):
+                # Price higher high AND ind lower high
+                # Guard: no bar between a and b may have ind > ind[a]
+                if (close[b] > close[a] and ind[b] < ind[a] and
+                        _no_higher_between(ind, a, b, ind[a])):
                     divergences.append({
                         'type': 'bearish',
                         'count': 2,
@@ -186,16 +199,16 @@ def detect_bearish_divergence(
                     if (c - b) < min_separation:
                         continue
                     # D1 and D2 must both be overbought (D1 qualifies implicitly
-                    # since indicator[a] > indicator[b] >= threshold)
+                    # since ind[a] > ind[b] and indicator[b] >= threshold)
                     if b not in qualifying:
                         continue
-                    # Progressively higher highs in price, lower highs in indicator
-                    # Guard: no bar between a↔b may exceed indicator[a],
-                    #         no bar between b↔c may exceed indicator[b]
+                    # Progressively higher highs in price, lower highs in ind
+                    # Guard: no bar between a↔b may exceed ind[a],
+                    #         no bar between b↔c may exceed ind[b]
                     if (close[a] < close[b] < close[c] and
-                            indicator[a] > indicator[b] > indicator[c] and
-                            _no_higher_between(indicator, a, b, indicator[a]) and
-                            _no_higher_between(indicator, b, c, indicator[b])):
+                            ind[a] > ind[b] > ind[c] and
+                            _no_higher_between(ind, a, b, ind[a]) and
+                            _no_higher_between(ind, b, c, ind[b])):
                         divergences.append({
                             'type': 'bearish',
                             'count': 3,
@@ -221,6 +234,7 @@ def detect_bullish_divergence(
     pivot_lookback: int,
     min_separation: int,
     divergence_count: int,
+    raw_indicator: Optional[np.ndarray] = None,
 ) -> List[Dict[str, Any]]:
     """
     Detect bullish divergence: price makes lower lows while indicator makes higher lows.
@@ -228,25 +242,30 @@ def detect_bullish_divergence(
 
     Args:
         Same as detect_bearish_divergence, but threshold is the LOWER threshold.
+        raw_indicator: See detect_bearish_divergence. When provided (MACD path),
+                       used for pivot detection, divergence direction, and
+                       between-checks instead of `indicator`.
 
     Returns:
         List of divergence records.
     """
+    ind = raw_indicator if raw_indicator is not None else indicator
+
     window_start = max(0, current_bar - lookback_window)
     window_end = current_bar
 
-    # Early exit: check if ANY indicator value in window <= threshold
+    # Early exit: check if ANY indicator (threshold scale) value in window <= threshold
     window_values = indicator[window_start:window_end + 1]
     valid_values = window_values[~np.isnan(window_values)]
     if len(valid_values) == 0 or np.min(valid_values) > threshold:
         return []
 
-    # Find all indicator pivot lows in the window
-    pivots = find_pivot_lows(indicator, window_start, window_end, pivot_lookback)
+    # Find pivot lows on ind (raw values)
+    pivots = find_pivot_lows(ind, window_start, window_end, pivot_lookback)
     if len(pivots) < divergence_count:
         return []
 
-    # At least one pivot must have indicator <= threshold
+    # Threshold qualification uses indicator (percentile / RSI threshold scale)
     qualifying = [p for p in pivots if indicator[p] <= threshold]
     if not qualifying:
         return []
@@ -261,10 +280,10 @@ def detect_bullish_divergence(
                     continue
                 if a not in qualifying and b not in qualifying:
                     continue
-                # Price lower low AND indicator higher low
-                # Guard: no bar between a and b may have indicator < indicator[a]
-                if (close[b] < close[a] and indicator[b] > indicator[a] and
-                        _no_lower_between(indicator, a, b, indicator[a])):
+                # Price lower low AND ind higher low
+                # Guard: no bar between a and b may have ind < ind[a]
+                if (close[b] < close[a] and ind[b] > ind[a] and
+                        _no_lower_between(ind, a, b, ind[a])):
                     divergences.append({
                         'type': 'bullish',
                         'count': 2,
@@ -284,16 +303,16 @@ def detect_bullish_divergence(
                     if (c - b) < min_separation:
                         continue
                     # D1 and D2 must both be oversold (D1 qualifies implicitly
-                    # since indicator[a] < indicator[b] <= threshold)
+                    # since ind[a] < ind[b] and indicator[b] <= threshold)
                     if b not in qualifying:
                         continue
-                    # Progressively lower lows in price, higher lows in indicator
-                    # Guard: no bar between a↔b may fall below indicator[a],
-                    #         no bar between b↔c may fall below indicator[b]
+                    # Progressively lower lows in price, higher lows in ind
+                    # Guard: no bar between a↔b may fall below ind[a],
+                    #         no bar between b↔c may fall below ind[b]
                     if (close[a] > close[b] > close[c] and
-                            indicator[a] < indicator[b] < indicator[c] and
-                            _no_lower_between(indicator, a, b, indicator[a]) and
-                            _no_lower_between(indicator, b, c, indicator[b])):
+                            ind[a] < ind[b] < ind[c] and
+                            _no_lower_between(ind, a, b, ind[a]) and
+                            _no_lower_between(ind, b, c, ind[b])):
                         divergences.append({
                             'type': 'bullish',
                             'count': 3,
