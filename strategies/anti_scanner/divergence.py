@@ -2,7 +2,8 @@
 Core Divergence Detection Algorithm
 
 Detects bearish and bullish divergences between price and an indicator
-(RSI or MACD). Supports 2-divergence (classic) and 3-divergence (triple).
+(RSI or MACD). Supports 2-divergence (classic), 3-divergence (triple),
+and 4-divergence (quadruple).
 
 The same algorithm is used for both RSI and MACD divergence — only the
 indicator values and threshold interpretation differ.
@@ -141,9 +142,9 @@ def detect_bearish_divergence(
                        artefacts from contaminating the divergence logic.
         strict_threshold: If True, every pivot in the pattern must qualify
                           (i.e. indicator >= threshold). If False (default),
-                          only the anchor (2-point) or anchor+D2 (3-point)
-                          must qualify; the final divergent pivot may be inside
-                          the threshold.
+                          only the anchor (2-point), anchor+D2 (3-point), or
+                          anchor+D2+D3 (4-point) must qualify; the final
+                          divergent pivot may be inside the threshold.
 
     Returns:
         List of divergence records. Each record contains pivot details.
@@ -236,6 +237,51 @@ def detect_bearish_divergence(
                             'divergence_end_bar': c,
                         })
 
+    elif divergence_count == 4:
+        for i_a in range(len(pivots)):
+            for i_b in range(i_a + 1, len(pivots)):
+                if (pivots[i_b] - pivots[i_a]) < min_separation:
+                    continue
+                for i_c in range(i_b + 1, len(pivots)):
+                    if (pivots[i_c] - pivots[i_b]) < min_separation:
+                        continue
+                    for i_d in range(i_c + 1, len(pivots)):
+                        a, b, c, d = pivots[i_a], pivots[i_b], pivots[i_c], pivots[i_d]
+                        if (d - c) < min_separation:
+                            continue
+                        # Threshold qualification gate
+                        if strict_threshold:
+                            if (a not in qualifying or b not in qualifying or
+                                    c not in qualifying or d not in qualifying):
+                                continue
+                        else:
+                            # Default: D2+D3 must qualify (D1 implied since D1>D2;
+                            # D4 may be inside threshold)
+                            if b not in qualifying or c not in qualifying:
+                                continue
+                        # Progressively higher highs in price, lower highs in ind
+                        # Guard: no bar between consecutive pivots may exceed
+                        #         the earlier pivot's ind value
+                        if (close[a] < close[b] < close[c] < close[d] and
+                                ind[a] > ind[b] > ind[c] > ind[d] and
+                                _no_higher_between(ind, a, b, ind[a]) and
+                                _no_higher_between(ind, b, c, ind[b]) and
+                                _no_higher_between(ind, c, d, ind[c])):
+                            divergences.append({
+                                'type': 'bearish',
+                                'count': 4,
+                                'pivot_bars': [a, b, c, d],
+                                'pivot_indicator_values': [float(indicator[a]),
+                                                           float(indicator[b]),
+                                                           float(indicator[c]),
+                                                           float(indicator[d])],
+                                'pivot_close_values': [float(close[a]),
+                                                       float(close[b]),
+                                                       float(close[c]),
+                                                       float(close[d])],
+                                'divergence_end_bar': d,
+                            })
+
     return divergences
 
 
@@ -261,6 +307,9 @@ def detect_bullish_divergence(
                        used for pivot detection, divergence direction, and
                        between-checks instead of `indicator`.
         strict_threshold: If True, every pivot must qualify (indicator <= threshold).
+                          If False (default), only anchor+D2 (3-point) or
+                          anchor+D2+D3 (4-point) must qualify; the final
+                          divergent pivot may be inside the threshold.
 
     Returns:
         List of divergence records.
@@ -350,5 +399,50 @@ def detect_bullish_divergence(
                                                    float(close[c])],
                             'divergence_end_bar': c,
                         })
+
+    elif divergence_count == 4:
+        for i_a in range(len(pivots)):
+            for i_b in range(i_a + 1, len(pivots)):
+                if (pivots[i_b] - pivots[i_a]) < min_separation:
+                    continue
+                for i_c in range(i_b + 1, len(pivots)):
+                    if (pivots[i_c] - pivots[i_b]) < min_separation:
+                        continue
+                    for i_d in range(i_c + 1, len(pivots)):
+                        a, b, c, d = pivots[i_a], pivots[i_b], pivots[i_c], pivots[i_d]
+                        if (d - c) < min_separation:
+                            continue
+                        # Threshold qualification gate
+                        if strict_threshold:
+                            if (a not in qualifying or b not in qualifying or
+                                    c not in qualifying or d not in qualifying):
+                                continue
+                        else:
+                            # Default: D2+D3 must qualify (D1 implied since D1<D2;
+                            # D4 may be inside threshold)
+                            if b not in qualifying or c not in qualifying:
+                                continue
+                        # Progressively lower lows in price, higher lows in ind
+                        # Guard: no bar between consecutive pivots may fall below
+                        #         the earlier pivot's ind value
+                        if (close[a] > close[b] > close[c] > close[d] and
+                                ind[a] < ind[b] < ind[c] < ind[d] and
+                                _no_lower_between(ind, a, b, ind[a]) and
+                                _no_lower_between(ind, b, c, ind[b]) and
+                                _no_lower_between(ind, c, d, ind[c])):
+                            divergences.append({
+                                'type': 'bullish',
+                                'count': 4,
+                                'pivot_bars': [a, b, c, d],
+                                'pivot_indicator_values': [float(indicator[a]),
+                                                           float(indicator[b]),
+                                                           float(indicator[c]),
+                                                           float(indicator[d])],
+                                'pivot_close_values': [float(close[a]),
+                                                       float(close[b]),
+                                                       float(close[c]),
+                                                       float(close[d])],
+                                'divergence_end_bar': d,
+                            })
 
     return divergences

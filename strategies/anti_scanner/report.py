@@ -118,6 +118,8 @@ def generate_report(
         lines.append(f"    Periods:            {rsi_cfg.get('periods', [])}")
         thresholds_str = ", ".join(f"{u}/{l}" for u, l in rsi_cfg.get('thresholds', []))
         lines.append(f"    Thresholds:         [{thresholds_str}]")
+        lines.append(f"    Bearish counts:     {rsi_cfg.get('bearish_divergence_counts', [])}")
+        lines.append(f"    Bullish counts:     {rsi_cfg.get('bullish_divergence_counts', [])}")
 
     macd_cfg = config.get('macd', {})
     if macd_cfg.get('enabled'):
@@ -128,13 +130,15 @@ def generate_report(
         lines.append(f"    Percentile lookback: {macd_cfg.get('percentile_lookback')} bars")
         pctl_str = ", ".join(f"{u}/{l}" for u, l in macd_cfg.get('percentile_thresholds', []))
         lines.append(f"    Pctl thresholds:    [{pctl_str}]")
+        lines.append(f"    Bearish counts:     {macd_cfg.get('bearish_divergence_counts', [])}")
+        lines.append(f"    Bullish counts:     {macd_cfg.get('bullish_divergence_counts', [])}")
 
     div_cfg = config.get('divergence', {})
     lines.append("  Divergence:")
     lines.append(f"    Lookback window:    {div_cfg.get('lookback_window')} bars")
     lines.append(f"    Pivot lookback:     {div_cfg.get('pivot_lookback')} bars")
     lines.append(f"    Min separation:     {div_cfg.get('min_separation')} bars")
-    lines.append(f"    Divergence counts:  {div_cfg.get('divergence_counts')}")
+    lines.append(f"    Strict threshold:   {div_cfg.get('strict_threshold', False)}")
 
     p2_cfg = config.get('phase2', {})
     lines.append("  Phase 2:")

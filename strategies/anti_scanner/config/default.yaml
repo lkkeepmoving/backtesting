@@ -16,8 +16,7 @@ divergence:
   lookback_window: 40           # Bars to look back for divergence from current bar
   pivot_lookback: 3             # Bars on each side to confirm a pivot high/low
   min_separation: 5             # Minimum bars between two pivots in a divergence pair
-  divergence_counts: [3]        # 2 = classic divergence, 3 = triple divergence. [2, 3]
-  strict_threshold: false       # If true, ALL pivot points (D1…Dn) must be outside the
+  strict_threshold: true        # If true, ALL pivot points (D1…Dn) must be outside the
                                 # threshold, not just the anchor. e.g. for bearish RSI
                                 # with threshold=70: every pivot must have RSI >= 70.
 
@@ -25,12 +24,15 @@ divergence:
 rsi:
   enabled: true
   periods: [7]                        # RSI periods to sweep. [7, 14, 21]
-  thresholds:                                  # [upper, lower] pairs for short/long setups
+  thresholds:                         # [upper, lower] pairs for short/long setups
     - [70, 30]
+  bearish_divergence_counts: [3]      # Counts for short setups. [] disables bearish RSI.
+                                      # 2=classic, 3=triple, 4=quadruple. e.g. [3, 4]
+  bullish_divergence_counts: [3]      # Counts for long setups.  [] disables bullish RSI.
 
 # Modified MACD Divergence
 macd:
-  enabled: true
+  enabled: false
   fast_period: 3                # SMA fast period (fixed per Anti strategy definition)
   slow_period: 10               # SMA slow period (fixed per Anti strategy definition)
   signal_period: 16             # Signal line SMA period (fixed per Anti strategy definition)
@@ -38,7 +40,8 @@ macd:
   percentile_lookback: 252      # Bars for computing MACD percentile baseline
   percentile_thresholds:        # [upper_percentile, lower_percentile] pairs
     - [80, 20]
-    - [90, 10]
+  bearish_divergence_counts: [3]  # Counts for short setups. [] disables bearish MACD.
+  bullish_divergence_counts: [3]  # Counts for long setups.  [] disables bullish MACD.
 
 # --- Phase 2: Counter-Trend Shock ---
 
@@ -48,7 +51,7 @@ phase2:
   shock_methods: ["sigma_spike", "price_pct_change"]  # Methods to test
 
   sigma_spike:
-    thresholds: [2.5]      # Sigma multiples. [2.0, 2.5, 3.0] 
+    thresholds: [2.5]      # Sigma multiples. [2.0, 2.5, 3.0]
     lookback: 20                       # Bars for computing daily return std dev
 
   price_pct_change:

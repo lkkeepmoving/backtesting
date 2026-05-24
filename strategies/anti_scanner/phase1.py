@@ -3,6 +3,11 @@ Phase 1: Divergence Detection Orchestrator
 
 Sweeps across all configured parameter combinations for RSI and MACD
 divergence detection. Phase 1 passes if ANY divergence is found.
+
+divergence_counts are configured per-indicator per-direction:
+  rsi.bearish_divergence_counts  / rsi.bullish_divergence_counts
+  macd.bearish_divergence_counts / macd.bullish_divergence_counts
+An empty list disables that direction for that indicator.
 """
 
 import numpy as np
@@ -41,7 +46,6 @@ def run_phase1(
     lookback_window = div_config['lookback_window']
     pivot_lookback = div_config['pivot_lookback']
     min_separation = div_config['min_separation']
-    divergence_counts = div_config['divergence_counts']
     strict_threshold = div_config.get('strict_threshold', False)
 
     detect_fn = (detect_bearish_divergence if direction == "short"
@@ -50,6 +54,12 @@ def run_phase1(
     # --- RSI Divergence ---
     rsi_config = config.get('rsi', {})
     if rsi_config.get('enabled', False):
+        # Per-direction divergence counts; empty list disables that direction
+        if direction == "short":
+            divergence_counts = rsi_config.get('bearish_divergence_counts', [])
+        else:
+            divergence_counts = rsi_config.get('bullish_divergence_counts', [])
+
         for period in rsi_config.get('periods', []):
             rsi_values = rsi_data.get(period)
             if rsi_values is None:
@@ -84,6 +94,12 @@ def run_phase1(
     # --- MACD Divergence ---
     macd_config = config.get('macd', {})
     if macd_config.get('enabled', False):
+        # Per-direction divergence counts; empty list disables that direction
+        if direction == "short":
+            divergence_counts = macd_config.get('bearish_divergence_counts', [])
+        else:
+            divergence_counts = macd_config.get('bullish_divergence_counts', [])
+
         macd_label = (f"MACD({macd_config.get('fast_period', 3)}/"
                       f"{macd_config.get('slow_period', 10)}/"
                       f"{macd_config.get('signal_period', 16)})")
