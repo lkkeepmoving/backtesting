@@ -1,0 +1,49 @@
+# =============================================================
+# Entry Analyzer — Standalone Configuration
+# =============================================================
+# Detects bullish RSI divergences and evaluates two entry ideas:
+#   Idea 1: First red/flat candle after Day D (close <= open)
+#   Idea 2: First close above reference price after Day D
+# =============================================================
+
+# --- Data ---
+data_bars: 500                   # Daily bars loaded per symbol
+
+# --- RSI Divergence (bullish only) ---
+
+divergence:
+  lookback_window: 60            # Bars before the last pivot to search for historical pivots
+                                 # (anchor in 2-div; anchor + middle in 3-div)
+  wing_bars: 5                   # Bars on EACH SIDE used to confirm a pivot as a local trough:
+                                 #   Historical pivots (anchor, middle): symmetric — wing_bars
+                                 #     bars to the LEFT and wing_bars bars to the RIGHT
+                                 #   Last pivot (Day D-1): wing_bars bars to the LEFT only;
+                                 #     right side is always exactly 1 bar (Day D itself),
+                                 #     confirming the trough the moment you can act on it
+  min_separation: 8              # Minimum bars between any two pivots in the same divergence
+  strict_threshold: true         # Require ALL pivot RSI values to be below lower threshold
+  pivot_source: "low"            # Price series used to find troughs: "low" (default) or "close"
+                                 # "low"   — uses the candle Low; standard industry practice,
+                                 #           identifies where buyers actually stepped in
+                                 # "close" — uses the closing price; more conservative,
+                                 #           filters out intraday wick-only new lows
+
+rsi:
+  periods: [7]                   # RSI periods to sweep
+  thresholds:
+    - [70, 30]                   # [upper (unused), lower] — lower threshold for bullish
+  bullish_divergence_counts: [2, 3]  # 2=classic pair, 3=triple
+
+# --- Entry Logic ---
+
+entry:
+  idea1:
+    enabled: true
+    window: 10                   # Max bars after Day D to search for first red/flat candle
+
+  idea2:
+    enabled: true
+    window: 20                   # Max bars after Day D to search for close > reference
+
+# --- Evaluation ---
+forward_bars: [1, 3, 5, 10]     # Bar horizons for forward return calculation

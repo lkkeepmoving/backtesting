@@ -26,9 +26,9 @@ rsi:
   periods: [7]                        # RSI periods to sweep. [7, 14, 21]
   thresholds:                         # [upper, lower] pairs for short/long setups
     - [70, 30]
-  bearish_divergence_counts: [3]      # Counts for short setups. [] disables bearish RSI.
+  bearish_divergence_counts: [0]      # Counts for short setups. [] disables bearish RSI.
                                       # 2=classic, 3=triple, 4=quadruple. e.g. [3, 4]
-  bullish_divergence_counts: [3]      # Counts for long setups.  [] disables bullish RSI.
+  bullish_divergence_counts: [2, 3]      # Counts for long setups.  [] disables bullish RSI.
 
 # Modified MACD Divergence
 macd:
