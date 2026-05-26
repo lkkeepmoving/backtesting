@@ -27,6 +27,7 @@ Thumbs.db
 data/storage/*.csv
 
 # API tokens (credentials)
+.tradestation_tokens
 data/.tradestation_tokens
 data/.schwab_tokens
 

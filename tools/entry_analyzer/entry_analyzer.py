@@ -119,6 +119,21 @@ def _no_lower_between(rsi: np.ndarray, a: int, b: int, ref: float) -> bool:
     return len(valid) == 0 or float(np.min(valid)) >= ref
 
 
+def _no_overbought_in_range(rsi: np.ndarray, a: int, b: int, upper_thresh: float) -> bool:
+    """
+    True if no RSI value in rsi[a..b] (inclusive, end-to-end) exceeds upper_thresh.
+
+    Applied to the full divergence span — from the first pivot (anchor) to the last
+    pivot — so that an overbought recovery anywhere inside the window disqualifies
+    the pattern.  A divergence whose RSI briefly crosses above the upper threshold
+    between two oversold lows is really two separate oversold episodes, not a single
+    coherent multi-pivot divergence.
+    """
+    segment = rsi[a:b + 1]
+    valid = segment[~np.isnan(segment)]
+    return len(valid) == 0 or float(np.max(valid)) <= upper_thresh
+
+
 def _has_price_bounce(close: np.ndarray, a: int, b: int) -> bool:
     """
     True if close price recovered above close[a] at any bar strictly between a and b.
@@ -139,25 +154,29 @@ def _has_price_bounce(close: np.ndarray, a: int, b: int) -> bool:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _detect_bullish_divergence(
-    current_bar: int,        # Day D — the bar you are scanning on
+    current_bar: int,              # Day D — the bar you are scanning on
     close: np.ndarray,
     low: np.ndarray,
     rsi: np.ndarray,
     lookback_window: int,
     lower_threshold: float,
-    wing_bars: int,          # bars each side for historical pivots; left-only for last pivot
+    upper_threshold: float,
+    wing_bars: int,                # bars each side for historical pivots; left-only for last pivot
+    last_pivot_right_bars: int,    # bars to the RIGHT of the last pivot that must all be higher
     min_separation: int,
     divergence_count: int,
     strict_threshold: bool,
     pivot_source: str = "low",
 ) -> List[Dict[str, Any]]:
     """
-    Detect bullish RSI divergence whose last pivot is current_bar - 1 (Day D-1).
+    Detect bullish RSI divergence whose last pivot is current_bar - last_pivot_right_bars.
 
     Last pivot confirmation (asymmetric — mimics real-time observation):
-      Left  : wing_bars bars to the left must all have a higher price than Day D-1
-      Right : exactly 1 bar — Day D's price must be strictly higher than Day D-1's price
-      → The trough at Day D-1 is confirmed the instant Day D closes; no future-bar leakage.
+      Left  : wing_bars bars to the left must all have a higher price than the last pivot
+      Right : last_pivot_right_bars consecutive bars (ending at current_bar / Day D) must
+              all be strictly higher than the last pivot's price
+      → With last_pivot_right_bars=2 (default), the trough requires two confirming bars
+        rather than one, filtering out troughs immediately undercut the very next day.
 
     Historical pivots (anchor for 2-div; anchor + middle for 3-div):
       Symmetric wing_bars on both left and right sides, located in the window
@@ -166,17 +185,21 @@ def _detect_bullish_divergence(
     price_arr = low if pivot_source == "low" else close
     n = len(price_arr)
 
-    last_pivot = current_bar - 1          # Day D-1 is always the last pivot candidate
+    last_pivot = current_bar - last_pivot_right_bars   # trough candidate
 
     # ── Guard: enough room for wing_bars to the left of last_pivot ────────────
     if last_pivot < wing_bars or current_bar >= n:
         return []
 
-    # ── Last pivot: right-side check — Day D must show a strictly higher price ─
-    if np.isnan(price_arr[last_pivot]) or np.isnan(price_arr[current_bar]):
+    # ── Last pivot: right-side check — all last_pivot_right_bars bars must be strictly higher ─
+    if np.isnan(price_arr[last_pivot]):
         return []
-    if price_arr[current_bar] <= price_arr[last_pivot]:
-        return []      # Day D is not higher → Day D-1 is not a trough
+    for k in range(1, last_pivot_right_bars + 1):
+        idx = last_pivot + k
+        if idx >= n or np.isnan(price_arr[idx]):
+            return []
+        if price_arr[idx] <= price_arr[last_pivot]:
+            return []  # One of the right-side bars is not higher → trough not confirmed
 
     # ── Last pivot: left-side check — wing_bars bars must all be higher ────────
     for k in range(1, wing_bars + 1):
@@ -223,10 +246,11 @@ def _detect_bullish_divergence(
                 if a not in qualifying_hist and not last_rsi_ok:
                     continue
 
-            if (price_arr[b] < price_arr[a]                     # price: lower low
-                    and rsi[b] > rsi[a]                          # RSI:   higher low
-                    and _no_lower_between(rsi, a, b, rsi[a])     # clean RSI between
-                    and _has_price_bounce(close, a, b)):          # separate price cycles
+            if (price_arr[b] < price_arr[a]                              # price: lower low
+                    and rsi[b] > rsi[a]                               # RSI:   higher low
+                    and _no_lower_between(rsi, a, b, rsi[a])          # no new RSI low between pivots
+                    and _no_overbought_in_range(rsi, a, b, upper_threshold)  # no overbought in full range
+                    and _has_price_bounce(close, a, b)):               # separate price cycles
                 results.append({
                     'count': 2,
                     'pivot_bars':  [a, b],
@@ -234,6 +258,7 @@ def _detect_bullish_divergence(
                     'pivot_close': [float(close[a]), float(close[b])],
                     'pivot_low':   [float(low[a]),   float(low[b])],
                     'divergence_end_bar': b,
+                    'day_d_bar': current_bar,
                 })
 
     # ── 3-divergence: anchor + middle (both historical) + last pivot ───────────
@@ -255,10 +280,11 @@ def _detect_bullish_divergence(
                     if mid not in qualifying_hist:   # middle must qualify at minimum
                         continue
 
-                if (price_arr[a] > price_arr[mid] > price_arr[b]        # three descending price lows
-                        and rsi[a] < rsi[mid] < rsi[b]                   # three ascending RSI lows
-                        and _no_lower_between(rsi, a,   mid, rsi[a])
-                        and _no_lower_between(rsi, mid, b,   rsi[mid])
+                if (price_arr[a] > price_arr[mid] > price_arr[b]               # three descending price lows
+                        and rsi[a] < rsi[mid] < rsi[b]                          # three ascending RSI lows
+                        and _no_lower_between(rsi, a,   mid, rsi[a])            # no new RSI low a→mid
+                        and _no_lower_between(rsi, mid, b,   rsi[mid])          # no new RSI low mid→b
+                        and _no_overbought_in_range(rsi, a, b, upper_threshold) # no overbought in full range a→b
                         and _has_price_bounce(close, a,   mid)
                         and _has_price_bounce(close, mid, b)):
                     results.append({
@@ -268,6 +294,7 @@ def _detect_bullish_divergence(
                         'pivot_close': [float(close[a]),  float(close[mid]), float(close[b])],
                         'pivot_low':   [float(low[a]),    float(low[mid]),   float(low[b])],
                         'divergence_end_bar': b,
+                        'day_d_bar': current_bar,
                     })
 
     return results
@@ -338,11 +365,12 @@ def scan_symbol(
     dates = df['Date'].values
 
     div_cfg = config['divergence']
-    lookback_window  = div_cfg['lookback_window']
-    wing_bars        = div_cfg['wing_bars']
-    min_separation   = div_cfg['min_separation']
-    strict_threshold = div_cfg.get('strict_threshold', False)
-    pivot_source     = div_cfg.get('pivot_source', 'low')   # "low" or "close"
+    lookback_window        = div_cfg['lookback_window']
+    wing_bars              = div_cfg['wing_bars']
+    last_pivot_right_bars  = div_cfg.get('last_pivot_right_bars', 1)
+    min_separation         = div_cfg['min_separation']
+    strict_threshold       = div_cfg.get('strict_threshold', False)
+    pivot_source           = div_cfg.get('pivot_source', 'low')   # "low" or "close"
 
     rsi_cfg = config['rsi']
     periods: List[int] = rsi_cfg.get('periods', [])
@@ -371,7 +399,9 @@ def scan_symbol(
                         rsi=rsi_values,
                         lookback_window=lookback_window,
                         lower_threshold=lower_thresh,
+                        upper_threshold=upper_thresh,
                         wing_bars=wing_bars,
+                        last_pivot_right_bars=last_pivot_right_bars,
                         min_separation=min_separation,
                         divergence_count=div_count,
                         strict_threshold=strict_threshold,
@@ -511,7 +541,8 @@ def generate_report(
                  f"(search range for historical pivots before last pivot)")
     lines.append(f"    Wing bars:          {div_cfg.get('wing_bars')} bars each side  "
                  f"(historical pivots: symmetric left+right;  last pivot: left only)")
-    lines.append(f"    Last pivot right:   1 bar fixed  (Day D confirms Day D-1 is a trough)")
+    lines.append(f"    Last pivot right:   {div_cfg.get('last_pivot_right_bars', 1)} bar(s)  "
+                 f"(all must be strictly higher than last pivot to confirm trough)")
     lines.append(f"    Min separation:     {div_cfg.get('min_separation')} bars")
     lines.append(f"    Strict threshold:   {div_cfg.get('strict_threshold', False)}")
     lines.append(f"    Pivot source:       {div_cfg.get('pivot_source', 'low')}  "
@@ -564,7 +595,7 @@ def generate_report(
             div_count:   int         = div['count']
             p_source:    str         = rec.get('pivot_source', 'low')
             last_pivot_bar: int = div['divergence_end_bar']
-            day_d_bar:      int = last_pivot_bar + 1
+            day_d_bar:      int = div['day_d_bar']
 
             # Pivot label names
             if div_count == 2:

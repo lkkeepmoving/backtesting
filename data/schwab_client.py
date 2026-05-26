@@ -377,10 +377,26 @@ class SchwabClient:
             return None
 
         try:
+            # Schwab valid periods: month=[1,2,3,6], year=[1,2,3,5,10,15,20]
+            if bar_count <= 21:
+                period_type, period = "month", 1
+            elif bar_count <= 42:
+                period_type, period = "month", 2
+            elif bar_count <= 63:
+                period_type, period = "month", 3
+            elif bar_count <= 126:
+                period_type, period = "month", 6
+            elif bar_count <= 252:
+                period_type, period = "year", 1
+            elif bar_count <= 504:
+                period_type, period = "year", 2
+            else:
+                period_type, period = "year", 3
+
             params = {
                 "symbol": symbol,
-                "periodType": "month",
-                "period": max(1, -(-bar_count // 21)),  # months needed to cover bar_count trading days
+                "periodType": period_type,
+                "period": period,
                 "frequencyType": "daily",
                 "frequency": 1,
                 "needExtendedHoursData": "false",

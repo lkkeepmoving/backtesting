@@ -12,17 +12,22 @@ data_bars: 500                   # Daily bars loaded per symbol
 # --- RSI Divergence (bullish only) ---
 
 divergence:
-  lookback_window: 60            # Bars before the last pivot to search for historical pivots
+  lookback_window: 40            # Bars before the last pivot to search for historical pivots
                                  # (anchor in 2-div; anchor + middle in 3-div)
   wing_bars: 5                   # Bars on EACH SIDE used to confirm a pivot as a local trough:
                                  #   Historical pivots (anchor, middle): symmetric — wing_bars
                                  #     bars to the LEFT and wing_bars bars to the RIGHT
-                                 #   Last pivot (Day D-1): wing_bars bars to the LEFT only;
-                                 #     right side is always exactly 1 bar (Day D itself),
-                                 #     confirming the trough the moment you can act on it
+                                 #   Last pivot: wing_bars bars to the LEFT; right side
+                                 #     controlled by last_pivot_right_bars below
+  last_pivot_right_bars: 1       # Bars to the RIGHT of the last pivot that must ALL be strictly
+                                 #   higher than the last pivot's price to confirm the trough.
+                                 #   Day D (the bar you act on) = last_pivot + last_pivot_right_bars.
+                                 #   1 = original single-bar confirmation (Day D immediately follows)
+                                 #   2 = two consecutive higher bars required (default); naturally
+                                 #       filters out troughs that are immediately undercut the next bar
   min_separation: 8              # Minimum bars between any two pivots in the same divergence
   strict_threshold: true         # Require ALL pivot RSI values to be below lower threshold
-  pivot_source: "low"            # Price series used to find troughs: "low" (default) or "close"
+  pivot_source: "close"            # Price series used to find troughs: "low" (default) or "close"
                                  # "low"   — uses the candle Low; standard industry practice,
                                  #           identifies where buyers actually stepped in
                                  # "close" — uses the closing price; more conservative,
@@ -31,8 +36,13 @@ divergence:
 rsi:
   periods: [7]                   # RSI periods to sweep
   thresholds:
-    - [70, 30]                   # [upper (unused), lower] — lower threshold for bullish
-  bullish_divergence_counts: [2, 3]  # 2=classic pair, 3=triple
+    - [70, 30]                   # [upper, lower]
+                                 #   lower — pivot RSI must be ≤ lower to qualify as oversold
+                                 #   upper — no RSI value anywhere in the full divergence range
+                                 #           (first pivot → last pivot, inclusive) may exceed upper;
+                                 #           enforces a single depressed cycle with no overbought
+                                 #           recovery between the divergence lows
+  bullish_divergence_counts: [2]  # 2=classic pair, 3=triple
 
 # --- Entry Logic ---
 
