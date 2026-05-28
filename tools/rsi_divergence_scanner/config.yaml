@@ -1,0 +1,44 @@
+# =============================================================
+# RSI Divergence Scanner — Configuration
+# =============================================================
+# Scans a stock list for RSI bullish 2-divergences that are
+# confirmed as of a specific date (--date flag).
+#
+# A divergence qualifies when:
+#   - The last RSI pivot trough is exactly `last_pivot_right_bars`
+#     trading days before --date
+#   - --date itself serves as the confirmation bar (Day D)
+# =============================================================
+
+# --- Data ---
+rsi_warmup_multiplier: 5         # data_bars = lookback_window + max(rsi_periods) * multiplier
+                                 # e.g. lookback=40, period=14, x5 → loads 110 bars
+                                 # More bars = better RSI convergence; loading extra is cheap
+
+# --- RSI Divergence (2-divergence / bullish only) ---
+
+divergence:
+  lookback_window: 40            # Bars before the last pivot to search for the anchor pivot
+  wing_bars: 5                   # Bars on EACH SIDE used to confirm a pivot as a local trough:
+                                 #   Anchor pivot: symmetric — wing_bars left AND right
+                                 #   Last pivot:   wing_bars left; right side controlled by
+                                 #                 last_pivot_right_bars below
+  last_pivot_right_bars: 2       # Bars to the RIGHT of the last pivot that must ALL be strictly
+                                 # higher than the last pivot price to confirm the trough.
+                                 # Day D = last_pivot + last_pivot_right_bars.
+                                 # Default 1 → last pivot is the day immediately before --date.
+  min_separation: 8              # Minimum bars between anchor pivot and last pivot
+  strict_threshold: true         # Require BOTH pivot RSI values to be ≤ lower threshold.
+                                 # false → at least one pivot must be ≤ lower threshold
+  pivot_source: "close"          # Price series used to find troughs: "low" or "close"
+                                 # "close" — uses closing price; more conservative,
+                                 #           filters out intraday wick-only new lows
+                                 # "low"   — uses candle low; standard industry practice
+
+rsi:
+  periods: [7]                   # RSI period(s) to evaluate
+  thresholds:
+    - [70, 30]                   # [upper, lower]
+                                 #   lower — pivot RSI must be ≤ lower to qualify as oversold
+                                 #   upper — no RSI value anywhere between anchor and last pivot
+                                 #           may exceed upper (no overbought recovery mid-divergence)
