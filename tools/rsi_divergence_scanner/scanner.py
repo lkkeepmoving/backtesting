@@ -447,241 +447,71 @@ def scan_symbol(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Report Generation
+# CSV Export
 # ═════════════════════════════════════════════════════════════════════════════
 
-def generate_report(
-    all_results: List[Dict[str, Any]],
-    run_date_str: str,
-    config: dict,
-    n_scanned: int,
-    n_skipped: int,
-) -> str:
-    lines: List[str] = []
-
-    div_cfg = config.get('divergence', {})
-    rsi_cfg = config.get('rsi', {})
-    multiplier = config.get('rsi_warmup_multiplier', 5)
-    lookback_window = div_cfg.get('lookback_window', 40)
-    max_period = max(rsi_cfg.get('periods', [14]))
-    data_bars = lookback_window + max_period * multiplier
-
-    n_qualified = len(all_results)
-    thresh_str = ", ".join(
-        f"{u}/{l}" for u, l in rsi_cfg.get('thresholds', [])
-    )
-
-    # ── Header ────────────────────────────────────────────────────────────────
-    lines.append("=" * 72)
-    lines.append("  RSI DIVERGENCE SCANNER")
-    lines.append("=" * 72)
-    lines.append(f"  Run date:   {run_date_str}  (Day D — divergence confirmed as of this date)")
-    lines.append(f"  Generated:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"  Scanned:    {n_scanned} symbol(s)  |  Skipped (no data for date): {n_skipped}")
-    lines.append("")
-    lines.append("  Config:")
-    lines.append(f"    RSI periods:          {rsi_cfg.get('periods', [])}")
-    lines.append(f"    Thresholds (U/L):     [{thresh_str}]")
-    lines.append(f"    Lookback window:      {lookback_window} bars")
-    lines.append(f"    Wing bars:            {div_cfg.get('wing_bars')} bars each side")
-    lines.append(f"    Last pivot right:     {div_cfg.get('last_pivot_right_bars', 1)} bar(s)")
-    lines.append(f"    Min separation:       {div_cfg.get('min_separation')} bars")
-    lines.append(f"    Strict threshold:     {div_cfg.get('strict_threshold', False)}")
-    lines.append(f"    Pivot source:         {div_cfg.get('pivot_source', 'close')}")
-    lines.append(f"    Min bars for RSI:     {data_bars}  "
-                 f"(lookback {lookback_window} + period {max_period} × {multiplier})  "
-                 f"[all available history is loaded]")
-    lines.append("=" * 72)
-    lines.append("")
-
-    if not all_results:
-        lines.append("  No qualifying divergences found.")
-        lines.append("")
-        lines.append("=" * 72)
-        return "\n".join(lines)
-
-    lines.append(f"  {n_qualified} qualifying divergence(s) found:")
-    lines.append("")
-
-    # ── Per-result blocks ─────────────────────────────────────────────────────
-    for rec in all_results:
-        symbol       = rec['symbol']
-        period       = rec['rsi_period']
-        lower_thresh = rec['threshold_lower']
-        upper_thresh = rec['threshold_upper']
-        p_source     = rec['pivot_source']
-        div          = rec['div']
-        dates        = rec['dates']
-        close        = rec['close']
-        low          = rec['low']
-
-        pivot_bars:  List[int]   = div['pivot_bars']
-        pivot_rsi:   List[float] = div['pivot_rsi']
-        pivot_close: List[float] = div['pivot_close']
-        pivot_low:   List[float] = div['pivot_low']
-        day_d_bar:   int         = div['day_d_bar']
-
-        a_bar, b_bar = pivot_bars
-
-        a_date = str(dates[a_bar]) if a_bar < len(dates) else "???"
-        b_date = str(dates[b_bar]) if b_bar < len(dates) else "???"
-        d_date = str(dates[day_d_bar]) if day_d_bar < len(dates) else "???"
-
-        low_marker   = " ◀pivot" if p_source == "low"   else ""
-        close_marker = " ◀pivot" if p_source == "close" else ""
-
-        lines.append("─" * 72)
-        lines.append(
-            f"  {symbol:<8}  RSI({period})  threshold ≤ {lower_thresh}"
-            f"  [no RSI > {upper_thresh} between pivots]  [pivot: {p_source}]"
-        )
-        lines.append(
-            f"    Anchor  {a_date}"
-            f"  Low=${pivot_low[0]:>8.2f}{low_marker}"
-            f"  Close=${pivot_close[0]:>8.2f}{close_marker}"
-            f"  RSI={pivot_rsi[0]:.1f}"
-        )
-        lines.append(
-            f"    Last    {b_date}"
-            f"  Low=${pivot_low[1]:>8.2f}{low_marker}"
-            f"  Close=${pivot_close[1]:>8.2f}{close_marker}"
-            f"  RSI={pivot_rsi[1]:.1f}"
-        )
-        lines.append(f"    Day D   {d_date}  ← confirmed today")
-        lines.append("")
-
-    lines.append("=" * 72)
-    lines.append(f"  {n_qualified} qualifying divergence(s)  |  {n_scanned} symbol(s) scanned")
-    lines.append("=" * 72)
-
-    return "\n".join(lines)
+CSV_COLUMNS = [
+    'date',
+    'symbol',
+    'rsi_period',
+    'threshold_lower',
+    'threshold_upper',
+    'pivot_source',
+    'last_pivot_right_bars',
+    'anchor_date',
+    'anchor_close',
+    'anchor_low',
+    'anchor_rsi',
+    'last_pivot_date',
+    'last_pivot_close',
+    'last_pivot_low',
+    'last_pivot_rsi',
+    'day_d_close',
+]
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Range Report Generation
-# ═════════════════════════════════════════════════════════════════════════════
+def _to_csv_row(rec: Dict[str, Any], last_pivot_right_bars: int) -> Dict[str, Any]:
+    div   = rec['div']
+    dates = rec['dates']
+    close = rec['close']
 
-def generate_range_report(
-    results_by_date: Dict[str, List[Dict[str, Any]]],
-    start_date_str: str,
-    end_date_str: str,
-    trading_sessions: List[str],
-    config: dict,
-    n_symbols: int,
-    n_skipped_symbols: int,
-) -> str:
-    """
-    Generate a report for a date-range scan, with results grouped by Day D.
-    """
-    lines: List[str] = []
+    a_bar, b_bar = div['pivot_bars']
+    day_d_bar    = div['day_d_bar']
 
-    div_cfg = config.get('divergence', {})
-    rsi_cfg = config.get('rsi', {})
+    def get_date(bar: int) -> str:
+        return str(dates[bar]) if 0 <= bar < len(dates) else ''
 
-    n_trading_days = len(trading_sessions)
-    all_hits       = [r for recs in results_by_date.values() for r in recs]
-    n_qualified    = len(all_hits)
-    n_hit_days     = sum(1 for recs in results_by_date.values() if recs)
-    thresh_str     = ", ".join(f"{u}/{l}" for u, l in rsi_cfg.get('thresholds', []))
+    return {
+        'date':                  get_date(day_d_bar),
+        'symbol':                rec['symbol'],
+        'rsi_period':            rec['rsi_period'],
+        'threshold_lower':       rec['threshold_lower'],
+        'threshold_upper':       rec['threshold_upper'],
+        'pivot_source':          rec['pivot_source'],
+        'last_pivot_right_bars': last_pivot_right_bars,
+        'anchor_date':           get_date(a_bar),
+        'anchor_close':          round(float(div['pivot_close'][0]), 2),
+        'anchor_low':            round(float(div['pivot_low'][0]), 2),
+        'anchor_rsi':            round(float(div['pivot_rsi'][0]), 2),
+        'last_pivot_date':       get_date(b_bar),
+        'last_pivot_close':      round(float(div['pivot_close'][1]), 2),
+        'last_pivot_low':        round(float(div['pivot_low'][1]), 2),
+        'last_pivot_rsi':        round(float(div['pivot_rsi'][1]), 2),
+        'day_d_close':           round(float(close[day_d_bar]), 2),
+    }
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    lines.append("=" * 72)
-    lines.append("  RSI DIVERGENCE SCANNER  —  DATE RANGE")
-    lines.append("=" * 72)
-    lines.append(f"  Range:      {start_date_str} → {end_date_str}")
-    lines.append(f"  Generated:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(
-        f"  Scanned:    {n_trading_days} trading day(s)  ×  "
-        f"{n_symbols - n_skipped_symbols} symbol(s)"
-        + (f"  |  {n_skipped_symbols} symbol(s) skipped (no data file)" if n_skipped_symbols else "")
-    )
-    lines.append("")
-    lines.append("  Config:")
-    lines.append(f"    RSI periods:          {rsi_cfg.get('periods', [])}")
-    lines.append(f"    Thresholds (U/L):     [{thresh_str}]")
-    lines.append(f"    Lookback window:      {div_cfg.get('lookback_window')} bars")
-    lines.append(f"    Wing bars:            {div_cfg.get('wing_bars')} bars each side")
-    lines.append(f"    Last pivot right:     {div_cfg.get('last_pivot_right_bars', 1)} bar(s)")
-    lines.append(f"    Min separation:       {div_cfg.get('min_separation')} bars")
-    lines.append(f"    Strict threshold:     {div_cfg.get('strict_threshold', False)}")
-    lines.append(f"    Pivot source:         {div_cfg.get('pivot_source', 'close')}")
-    lines.append("=" * 72)
-    lines.append("")
 
-    if not all_hits:
-        lines.append("  No qualifying divergences found in this date range.")
-        lines.append("")
-        lines.append("=" * 72)
-        return "\n".join(lines)
-
-    lines.append(
-        f"  {n_qualified} qualifying divergence(s) across "
-        f"{n_hit_days} of {n_trading_days} trading day(s):"
-    )
-    lines.append("")
-
-    p_source = div_cfg.get('pivot_source', 'close')
-    low_marker   = " ◀pivot" if p_source == "low"   else ""
-    close_marker = " ◀pivot" if p_source == "close" else ""
-
-    # ── Per-day blocks (chronological) ───────────────────────────────────────
-    for date_str in trading_sessions:
-        recs = results_by_date.get(date_str)
-        if not recs:
-            continue
-
-        lines.append(f"─── {date_str} " + "─" * (72 - 8 - len(date_str)))
-        lines.append("")
-
-        for rec in recs:
-            symbol       = rec['symbol']
-            period       = rec['rsi_period']
-            lower_thresh = rec['threshold_lower']
-            upper_thresh = rec['threshold_upper']
-            div          = rec['div']
-            dates        = rec['dates']
-            close        = rec['close']
-            low          = rec['low']
-
-            pivot_bars:  List[int]   = div['pivot_bars']
-            pivot_rsi:   List[float] = div['pivot_rsi']
-            pivot_close: List[float] = div['pivot_close']
-            pivot_low:   List[float] = div['pivot_low']
-            day_d_bar:   int         = div['day_d_bar']
-
-            a_bar, b_bar = pivot_bars
-            a_date = str(dates[a_bar]) if a_bar < len(dates) else "???"
-            b_date = str(dates[b_bar]) if b_bar < len(dates) else "???"
-            d_date = str(dates[day_d_bar]) if day_d_bar < len(dates) else "???"
-
-            lines.append(
-                f"  {symbol:<8}  RSI({period})  threshold ≤ {lower_thresh}"
-                f"  [no RSI > {upper_thresh} between pivots]  [pivot: {p_source}]"
-            )
-            lines.append(
-                f"    Anchor  {a_date}"
-                f"  Low=${pivot_low[0]:>8.2f}{low_marker}"
-                f"  Close=${pivot_close[0]:>8.2f}{close_marker}"
-                f"  RSI={pivot_rsi[0]:.1f}"
-            )
-            lines.append(
-                f"    Last    {b_date}"
-                f"  Low=${pivot_low[1]:>8.2f}{low_marker}"
-                f"  Close=${pivot_close[1]:>8.2f}{close_marker}"
-                f"  RSI={pivot_rsi[1]:.1f}"
-            )
-            lines.append(f"    Day D   {d_date}  ← confirmed")
-            lines.append("")
-
-    lines.append("=" * 72)
-    lines.append(
-        f"  {n_qualified} qualifying divergence(s)  |  "
-        f"{n_trading_days} trading day(s)  |  "
-        f"{n_symbols - n_skipped_symbols} symbol(s) scanned"
-    )
-    lines.append("=" * 72)
-
-    return "\n".join(lines)
+def export_csv(
+    filepath: str,
+    results: List[Dict[str, Any]],
+    last_pivot_right_bars: int,
+) -> None:
+    rows = [_to_csv_row(rec, last_pivot_right_bars) for rec in results]
+    rows.sort(key=lambda r: (r['date'], r['symbol']))
+    with open(filepath, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -856,8 +686,7 @@ Date-range mode:
         print("=" * 65)
         print()
 
-        # results_by_date[date_str] = list of result dicts
-        results_by_date: Dict[str, List[Dict[str, Any]]] = {d: [] for d in trading_sessions}
+        all_results: List[Dict[str, Any]] = []
         n_skipped = 0
 
         for i, symbol in enumerate(symbols, 1):
@@ -882,7 +711,7 @@ Date-range mode:
                     logger.debug("scan_symbol error for %s on %s: %s", symbol, date_str, exc)
                     continue
                 if results:
-                    results_by_date[date_str].extend(results)
+                    all_results.extend(results)
                     symbol_hits += len(results)
 
             if symbol_hits:
@@ -892,24 +721,14 @@ Date-range mode:
 
         print()
 
-        # ── Range report ──────────────────────────────────────────────────────
-        report = generate_range_report(
-            results_by_date=results_by_date,
-            start_date_str=args.start_date,
-            end_date_str=args.end_date,
-            trading_sessions=trading_sessions,
-            config=config,
-            n_symbols=len(symbols),
-            n_skipped_symbols=n_skipped,
-        )
+        timestamp  = datetime.now().strftime('%Y%m%d_%H%M%S')
+        csv_path   = output_dir / f"rsi_divergence_{args.start_date}_{args.end_date}_{timestamp}.csv"
+        last_pivot_right_bars = div_cfg.get('last_pivot_right_bars', 1)
+        export_csv(str(csv_path), all_results, last_pivot_right_bars)
 
-        timestamp   = datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_path = output_dir / f"rsi_divergence_{args.start_date}_{args.end_date}_{timestamp}.txt"
-        report_path.write_text(report)
-
-        print(f"Report saved: {report_path}")
-        print()
-        print(report)
+        print(f"CSV saved: {csv_path}")
+        print(f"{len(all_results)} signal(s) across {len(trading_sessions)} trading day(s)  |  "
+              f"{len(symbols) - n_skipped} symbol(s) scanned")
         return
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -983,15 +802,13 @@ Date-range mode:
         )
 
     n_scanned = len(symbols) - n_skipped
-    report    = generate_report(all_results, run_date_str, config, n_scanned, n_no_date)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    csv_path  = output_dir / f"rsi_divergence_{run_date_str}_{timestamp}.csv"
+    last_pivot_right_bars = div_cfg.get('last_pivot_right_bars', 1)
+    export_csv(str(csv_path), all_results, last_pivot_right_bars)
 
-    timestamp   = datetime.now().strftime('%Y%m%d_%H%M%S')
-    report_path = output_dir / f"rsi_divergence_{run_date_str}_{timestamp}.txt"
-    report_path.write_text(report)
-
-    print(f"Report saved: {report_path}")
-    print()
-    print(report)
+    print(f"CSV saved: {csv_path}")
+    print(f"{len(all_results)} signal(s)  |  {n_scanned} symbol(s) scanned")
 
 
 if __name__ == '__main__':
