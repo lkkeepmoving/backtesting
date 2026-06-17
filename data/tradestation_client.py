@@ -211,7 +211,7 @@ class TradeStationClient:
             'client_id': self.api_key,
             'audience': 'https://api.tradestation.com',
             'redirect_uri': self.callback_url,
-            'scope': 'openid offline_access MarketData ReadAccount Trade',
+            'scope': 'openid offline_access MarketData ReadAccount Trade OptionSpreads',
             'state': 'tradestation_auth'
         }
         query_string = urllib.parse.urlencode(params)
@@ -394,7 +394,7 @@ class TradeStationClient:
                 'High': 'High',
                 'Low': 'Low',
                 'Close': 'Close',
-                'Volume': 'Volume'
+                'TotalVolume': 'Volume'
             }, inplace=True)
 
             # Convert date to YYYY-MM-DD format
