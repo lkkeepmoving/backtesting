@@ -161,20 +161,38 @@ class OptionsAnalyzer:
             return None
         return r.json().get('Expirations') or []
 
-    def pick_expiration(self, expirations, target_dte):
-        """Return (iso_date, dte, mmddyyyy) closest to target, preferring Monthly."""
+    def pick_expiration(self, expirations, target_dte=None, mode='dte', min_dte=14):
+        """Return (iso_date, dte, mmddyyyy).
+
+        mode='dte'     : expiration with DTE closest to target_dte (prefers
+                         Monthly on near-ties via a small penalty).
+        mode='monthly' : the NEAREST standard Monthly expiration that is at
+                         least `min_dte` days out (the densest-liquidity probe).
+        """
         today = datetime.now(timezone.utc).date()
-        candidates = []
+        parsed = []
         for e in expirations:
             iso = (e.get('Date') or '')[:10]
             try:
                 dt = datetime.strptime(iso, '%Y-%m-%d').date()
             except ValueError:
                 continue
-            dte = (dt - today).days
+            parsed.append((iso, dt, (dt - today).days, e.get('Type')))
+
+        if mode == 'monthly':
+            cands = sorted((dte, iso, dt.strftime('%m-%d-%Y'))
+                           for iso, dt, dte, typ in parsed
+                           if typ == 'Monthly' and dte >= min_dte)
+            if not cands:
+                return None
+            dte, iso, mmddyyyy = cands[0]
+            return iso, dte, mmddyyyy
+
+        candidates = []
+        for iso, dt, dte, typ in parsed:
             if dte < 1:
                 continue
-            penalty = 0 if e.get('Type') == 'Monthly' else 5  # prefer monthlies
+            penalty = 0 if typ == 'Monthly' else 5  # prefer monthlies
             candidates.append((abs(dte - target_dte) + penalty, iso, dte,
                                dt.strftime('%m-%d-%Y')))
         if not candidates:
@@ -233,7 +251,7 @@ class OptionsAnalyzer:
             logger.debug(f'{option_symbol}: quote stream error {e}')
         return None
 
-    def analyze(self, symbol, target_dte):
+    def analyze(self, symbol, target_dte=None, mode='dte', min_dte=14):
         last, u_bid, u_ask, u_vol = self.underlying_quote(symbol)
         u_spread_pct = None
         if last and u_bid and u_ask and last > 0:
@@ -256,7 +274,7 @@ class OptionsAnalyzer:
             row['verdict'] = 'NO OPTIONS'
             return row
 
-        picked = self.pick_expiration(exps, target_dte)
+        picked = self.pick_expiration(exps, target_dte, mode, min_dte)
         if not picked:
             return row
         iso, dte, mmddyyyy = picked
@@ -309,13 +327,21 @@ def load_symbols_with_meta(file_path):
     return rows
 
 
-def definitions_text(dte):
+def probe_description(mode, target_dte, min_dte):
+    """One-line description of which expiration is probed."""
+    if mode == 'monthly':
+        return (f"the NEAREST standard MONTHLY expiration (>= {min_dte} days out) "
+                "-- the densest-liquidity probe")
+    return f"the listed expiration CLOSEST TO {target_dte} DTE (days to expiration)"
+
+
+def definitions_text(mode, target_dte, min_dte):
     return (
         "OPTIONS LIQUIDITY -- METRIC DEFINITIONS\n"
         "=======================================\n"
-        f"All option metrics are for the AT-THE-MONEY (ATM) CALL at the listed\n"
-        f"expiration CLOSEST TO {dte} DTE (days to expiration). ATM = the listed\n"
-        "strike nearest the underlying's last traded price.\n\n"
+        "All option metrics are for the AT-THE-MONEY (ATM) CALL at\n"
+        f"{probe_description(mode, target_dte, min_dte)}.\n"
+        "ATM = the listed strike nearest the underlying's last traded price.\n\n"
         "spread_pct : (Ask - Bid) / Mid * 100, where Mid = (Bid + Ask) / 2.\n"
         "             The round-trip cost to cross the option's bid/ask, as a %\n"
         "             of its mid price. Lower = tighter = better.\n"
@@ -336,11 +362,23 @@ def main():
     g = parser.add_mutually_exclusive_group(required=True)
     g.add_argument('--symbols', nargs='+', help='Symbols, e.g. AAPL UI MELI')
     g.add_argument('--symbols-file', help='finviz-style CSV (symbol,country,market_cap)')
-    parser.add_argument('--dte', type=int, default=60, help='Target days to expiration (default 60)')
+    parser.add_argument('--dte', default='60',
+                        help="Target days to expiration (int), or 'monthly' for the "
+                             "nearest standard monthly expiration (default 60)")
+    parser.add_argument('--min-dte', type=int, default=14,
+                        help="In 'monthly' mode, skip expirations closer than this "
+                             "many days (default 7)")
     parser.add_argument('--limit', type=int, help='Only analyze first N symbols (testing)')
     parser.add_argument('--workers', type=int, default=5, help='Parallel workers (default 5)')
+    parser.add_argument('--retries', type=int, default=2,
+                        help='Sequential retry passes for NO DATA stragglers (default 2)')
     parser.add_argument('--output', default='options_liquidity.csv')
     args = parser.parse_args()
+
+    if str(args.dte).lower() == 'monthly':
+        mode, target_dte = 'monthly', None
+    else:
+        mode, target_dte = 'dte', int(args.dte)
 
     if args.symbols:
         meta = [{'symbol': s, 'country': '', 'market_cap': ''} for s in args.symbols]
@@ -351,9 +389,8 @@ def main():
     if not meta:
         logger.error('No symbols to analyze.')
         sys.exit(1)
-    meta_by_sym = {m['symbol']: m for m in meta}
 
-    print(definitions_text(args.dte))
+    print(definitions_text(mode, target_dte, args.min_dte))
 
     client = TradeStationClient(get_tradestation_config())
     analyzer = OptionsAnalyzer(client)
@@ -364,7 +401,7 @@ def main():
     progress_lock = threading.Lock()
 
     def work(m):
-        return analyzer.analyze(m['symbol'], args.dte)
+        return analyzer.analyze(m['symbol'], target_dte, mode, args.min_dte)
 
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {ex.submit(work, m): m['symbol'] for m in meta}
@@ -383,6 +420,24 @@ def main():
                 logger.info(f"[{done}/{total}] {sym:6} "
                             f"spread={sp if sp is not None else '-'}% "
                             f"OI={oi if oi is not None else '-'} => {row.get('verdict')}")
+
+    # Sequential retry of NO DATA stragglers (parallel streaming can be throttled,
+    # especially after hours). Single-threaded recovers them reliably.
+    for attempt in range(1, args.retries + 1):
+        if analyzer.options_403:
+            break
+        stragglers = [m for m in meta
+                      if results.get(m['symbol'], {}).get('verdict') == 'NO DATA']
+        if not stragglers:
+            break
+        logger.info(f"Retry pass {attempt}: {len(stragglers)} NO DATA symbols (sequential)")
+        for m in stragglers:
+            row = analyzer.analyze(m['symbol'], target_dte, mode, args.min_dte)
+            results[m['symbol']] = row
+            sp = row.get('opt_spread_pct')
+            logger.info(f"  retry {m['symbol']:6} spread={sp if sp is not None else '-'}% "
+                        f"=> {row.get('verdict')}")
+            time.sleep(0.15)
 
     if analyzer.options_403:
         logger.error("Options endpoints returned 403 'Missing required scope'. Ensure the "
@@ -425,7 +480,7 @@ def main():
         w.writerows(out_rows)
 
     defs_path = out.with_name(out.stem + '_definitions.txt')
-    defs_path.write_text(definitions_text(args.dte))
+    defs_path.write_text(definitions_text(mode, target_dte, args.min_dte))
 
     def n(v):
         return sum(1 for r in out_rows if r['verdict'] == v)

@@ -21,9 +21,9 @@ DEFINITIONS = """\
 ================================================================================
  Generated : {generated}
  Universe  : {n} symbols (finviz $30B+ large caps)
- Probe     : the AT-THE-MONEY (ATM) CALL at the listed expiration CLOSEST TO
-             {dte} DTE. ATM = the listed strike nearest the underlying's last
-             traded price. All option figures are for that single contract.
+ Probe     : the AT-THE-MONEY (ATM) CALL at {probe}.
+             ATM = the listed strike nearest the underlying's last traded price.
+             All option figures are for that single contract.
 
  COLUMN DEFINITIONS
  ------------------
@@ -32,15 +32,13 @@ DEFINITIONS = """\
             its mid price. LOWER = tighter = cheaper to trade.
             Rating:  <=3 excellent | <=7 good | <=12 marginal | else avoid
 
- OI       = DailyOpenInterest of that same ATM ~{dte}-DTE call: the number of
-            outstanding contracts at that one strike + expiration.
+ OI       = DailyOpenInterest of that same ATM call: the number of outstanding
+            contracts at that one strike + expiration.
             HIGHER = deeper standing liquidity.
             Rating:  >=1000 strong | >=250 ok | >=50 thin | else illiquid
-            NOTE: OI is for a SINGLE strike on an expiration that is not yet the
-            front month, so it tends to UNDERSTATE a name's true option liquidity.
-            When SPREAD% and OI disagree, SPREAD% (the actual cost) is the more
-            reliable signal.
-
+            NOTE: OI is for a SINGLE strike. When SPREAD% and OI disagree,
+            SPREAD% (the actual cost) is the more reliable signal.
+{oi_note}
  VERDICT  = TRADEABLE  if SPREAD% <= 10 AND OI >= 250
             SKIP       if options exist but fail either gate
             NO OPTIONS if the underlying lists no options at all
@@ -72,8 +70,21 @@ def main():
     ap = argparse.ArgumentParser(description='Render options liquidity CSV as text')
     ap.add_argument('--input', default='options_liquidity.csv')
     ap.add_argument('--output', default='options_liquidity.txt')
+    ap.add_argument('--mode', choices=['dte', 'monthly'], default='dte',
+                    help="Which probe the CSV was generated with (for the header)")
     ap.add_argument('--dte', type=int, default=60)
+    ap.add_argument('--min-dte', type=int, default=14)
     args = ap.parse_args()
+
+    if args.mode == 'monthly':
+        probe = (f"the NEAREST standard MONTHLY expiration (>= {args.min_dte} days "
+                 "out) -- the densest-liquidity expiration")
+        oi_note = ("            This run probes the nearest monthly, the deepest-OI\n"
+                   "            expiration, so this is a BEST-CASE liquidity read.\n")
+    else:
+        probe = f"the listed expiration CLOSEST TO {args.dte} DTE"
+        oi_note = ("            This expiration is not yet the front month, so single-\n"
+                   "            strike OI tends to UNDERSTATE true option liquidity.\n")
 
     with open(args.input) as f:
         rows = list(csv.DictReader(f))
@@ -89,7 +100,7 @@ def main():
                                oir='OI_RATE', dte='DTE', strike='STRIKE')
 
     lines = [DEFINITIONS.format(generated=datetime.now().strftime('%Y-%m-%d %H:%M'),
-                                n=len(rows), dte=args.dte)]
+                                n=len(rows), probe=probe, oi_note=oi_note)]
 
     groups = [
         ('TRADEABLE', 'spread <= 10% AND OI >= 250'),
