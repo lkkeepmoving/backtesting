@@ -360,14 +360,15 @@ The other {len(baseline_dates) - len(signals)} are the control-only days used in
 <div class="controls">
   <label>SPY rose &ge; (%)<input id="fSpy" type="number" step="0.1" placeholder="any"></label>
   <label>QQQ rose &ge; (%)<input id="fQqq" type="number" step="0.1" placeholder="any"></label>
-  <label>VIX fell &lt; (%)<input id="fVix" type="number" step="0.1" placeholder="any"></label>
+  <label>Max VIX drop (%)<input id="fVix" type="number" step="0.1" placeholder="any"></label>
   <button id="reset">Reset</button>
   <div style="margin-left:auto;">Showing <span id="vcount">0</span> rows</div>
 </div>
 <div class="livebox" style="margin:-6px 0 14px;">
-  &ldquo;VIX fell &lt;&rdquo; keeps days where VIX dropped less than that % (your divergence);
-  e.g. enter <b>1</b> for &ldquo;VIX fell less than 1%&rdquo;. Blank = no filter.
-  Stats below update live for the visible rows.
+  <b>Max VIX drop</b> = the biggest VIX fall you'll allow (the divergence: VIX <em>didn't</em>
+  drop much). The VIX% column is signed &mdash; a fall of 3% shows as &minus;3.00.
+  <b>Example:</b> looking for &ldquo;VIX fell less than 3%&rdquo;? Type <b>3</b>.
+  <span id="vixHint"></span> Blank = no VIX filter. Stats below update live for the visible rows.
 </div>
 
 <table class="live" id="liveStats">
@@ -431,6 +432,9 @@ function applyFilters() {{
     if (ok) visible++;
   }}
   document.getElementById('vcount').textContent = visible;
+  const hint = document.getElementById('vixHint');
+  hint.textContent = isNaN(vFell) ? ''
+    : `→ keeping days where VIX% ≥ −${{vFell}} (fell less than ${{vFell}}%, VIX-up days included).`;
   updateLiveStats();
 }}
 
