@@ -34,6 +34,7 @@ data/.schwab_tokens
 # Report files (generated)
 reports/*.txt
 reports/*.csv
+reports/*.html
 
 # Run logs
 data/*.log
