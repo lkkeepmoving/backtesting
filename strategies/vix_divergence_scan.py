@@ -53,6 +53,8 @@ class Signal(NamedTuple):
     spy: float
     qqq: float
     vix: float
+    spy_prev5: Optional[float]  # SPY return over the 5 days BEFORE the signal day
+    qqq_prev5: Optional[float]  # QQQ return over the 5 days BEFORE the signal day
     spy_fwd: Dict[int, Optional[float]]
     qqq_fwd: Dict[int, Optional[float]]
     vix_fwd: Dict[int, Optional[float]]
@@ -138,8 +140,14 @@ def scan(spy_up: Optional[float], qqq_up: Optional[float], vix_threshold: float,
         if vix_r <= -vix_threshold:
             continue
 
+        # backward-looking: return over the 5 trading days BEFORE the signal day
+        # = close[i-1] / close[i-6] - 1 (excludes the signal day itself)
+        spy_prev5 = pct(spy[dates[i - 1]], spy[dates[i - 6]]) if i >= 6 else None
+        qqq_prev5 = pct(qqq[dates[i - 1]], qqq[dates[i - 6]]) if i >= 6 else None
+
         signals.append(Signal(
             date=d, spy=spy_r, qqq=qqq_r, vix=vix_r,
+            spy_prev5=spy_prev5, qqq_prev5=qqq_prev5,
             spy_fwd={n: forward(spy, dates, i, n) for n in HORIZONS},
             qqq_fwd={n: forward(qqq, dates, i, n) for n in HORIZONS},
             vix_fwd={n: forward(vix, dates, i, n) for n in HORIZONS},
@@ -165,14 +173,16 @@ def _fmt(v: Optional[float]) -> str:
 
 
 def print_table(signals: List[Signal]):
-    cols = (f"{'Date':<11}{'SPY%':>7}{'QQQ%':>7}{'VIX%':>7}  | "
+    cols = (f"{'Date':<11}{'SPYpre5':>8}{'QQQpre5':>8}  |"
+            f"{'SPY%':>7}{'QQQ%':>7}{'VIX%':>7}  | "
             + "".join(f"SPY+{n:<4}" for n in HORIZONS) + " | "
             + "".join(f"QQQ+{n:<4}" for n in HORIZONS) + " | "
             + "".join(f"VIX+{n:<4}" for n in HORIZONS))
     print(cols)
     print("-" * len(cols))
     for s in signals:
-        line = (f"{s.date:<11}{s.spy:>7.2f}{s.qqq:>7.2f}{s.vix:>7.2f}  | "
+        line = (f"{s.date:<11}{_fmt(s.spy_prev5):>8}{_fmt(s.qqq_prev5):>8}  |"
+                f"{s.spy:>7.2f}{s.qqq:>7.2f}{s.vix:>7.2f}  | "
                 + "".join(_fmt(s.spy_fwd[n]) + " " for n in HORIZONS) + "| "
                 + "".join(_fmt(s.qqq_fwd[n]) + " " for n in HORIZONS) + "| "
                 + "".join(_fmt(s.vix_fwd[n]) + " " for n in HORIZONS))
@@ -232,18 +242,23 @@ def export_csv(signals: List[Signal], params: str) -> str:
     os.makedirs(REPORTS, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(REPORTS, f"vix_divergence_{ts}.csv")
-    header = (["Date", "SPY%", "QQQ%", "VIX%"]
+    header = (["Date", "SPY_prev5", "QQQ_prev5", "SPY%", "QQQ%", "VIX%"]
               + [f"SPY+{n}" for n in HORIZONS]
               + [f"QQQ+{n}" for n in HORIZONS]
               + [f"VIX+{n}" for n in HORIZONS])
+
+    def f2(v):
+        return f"{v:.2f}" if v is not None else ""
+
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow([f"# {params}"])
         w.writerow(header)
         for s in signals:
-            row = [s.date, f"{s.spy:.2f}", f"{s.qqq:.2f}", f"{s.vix:.2f}"]
+            row = [s.date, f2(s.spy_prev5), f2(s.qqq_prev5),
+                   f"{s.spy:.2f}", f"{s.qqq:.2f}", f"{s.vix:.2f}"]
             for fwd in (s.spy_fwd, s.qqq_fwd, s.vix_fwd):
-                row += [f"{fwd[n]:.2f}" if fwd[n] is not None else "" for n in HORIZONS]
+                row += [f2(fwd[n]) for n in HORIZONS]
             w.writerow(row)
     return path
 
@@ -265,16 +280,18 @@ def export_html(signals, baseline_dates, market, params, rng_label) -> str:
             return "neg2"
         return "neg1"
 
-    def cell(v, numeric=True):
+    def cell(v, extra=""):
         if v is None:
-            return '<td class="none">--</td>'
-        return f'<td class="{rcls(v)}" data-sort="{v:.4f}">{v:+.2f}</td>'
+            return f'<td class="none{extra}">--</td>'
+        return f'<td class="{rcls(v)}{extra}" data-sort="{v:.4f}">{v:+.2f}</td>'
 
     # signal rows
     body = []
     for s in signals:
         tds = [f'<td class="date" data-sort="{s.date}">{s.date}</td>',
-               f'<td class="day" data-sort="{s.spy:.4f}">{s.spy:+.2f}</td>',
+               cell(s.spy_prev5, " grpL"),
+               cell(s.qqq_prev5),
+               f'<td class="day grpD" data-sort="{s.spy:.4f}">{s.spy:+.2f}</td>',
                f'<td class="day" data-sort="{s.qqq:.4f}">{s.qqq:+.2f}</td>',
                f'<td class="day vix" data-sort="{s.vix:.4f}">{s.vix:+.2f}</td>']
         for fwd in (s.spy_fwd, s.qqq_fwd, s.vix_fwd):
@@ -320,6 +337,8 @@ def export_html(signals, baseline_dates, market, params, rng_label) -> str:
   td.date {{ text-align:left; font-variant-numeric:tabular-nums; }}
   td.day {{ font-weight:600; background:#f3f6fb; }}
   td.day.vix {{ background:#f7f0fb; }}
+  .grpL {{ border-left:3px solid #9a6700; }}
+  .grpD {{ border-left:3px solid #57606a; }}
   .grpS {{ border-left:3px solid #0969da; }}
   .grpQ {{ border-left:3px solid #1a7f37; }}
   .grpV {{ border-left:3px solid #8250df; }}
@@ -361,6 +380,10 @@ The other {len(baseline_dates) - len(signals)} are the control-only days used in
   <label>SPY rose &ge; (%)<input id="fSpy" type="number" step="0.1" placeholder="any"></label>
   <label>QQQ rose &ge; (%)<input id="fQqq" type="number" step="0.1" placeholder="any"></label>
   <label>Max VIX drop (%)<input id="fVix" type="number" step="0.1" placeholder="any"></label>
+  <label>SPY prev-5d min (%)<input id="fSpyPreMin" type="number" step="0.1" placeholder="any"></label>
+  <label>SPY prev-5d max (%)<input id="fSpyPreMax" type="number" step="0.1" placeholder="any"></label>
+  <label>QQQ prev-5d min (%)<input id="fQqqPreMin" type="number" step="0.1" placeholder="any"></label>
+  <label>QQQ prev-5d max (%)<input id="fQqqPreMax" type="number" step="0.1" placeholder="any"></label>
   <button id="reset">Reset</button>
   <div style="margin-left:auto;">Showing <span id="vcount">0</span> rows</div>
 </div>
@@ -368,7 +391,11 @@ The other {len(baseline_dates) - len(signals)} are the control-only days used in
   <b>Max VIX drop</b> = the biggest VIX fall you'll allow (the divergence: VIX <em>didn't</em>
   drop much). The VIX% column is signed &mdash; a fall of 3% shows as &minus;3.00.
   <b>Example:</b> looking for &ldquo;VIX fell less than 3%&rdquo;? Type <b>3</b>.
-  <span id="vixHint"></span> Blank = no VIX filter. Stats below update live for the visible rows.
+  <span id="vixHint"></span> Blank = no VIX filter.<br>
+  <b>SPY/QQQ prev-5d</b> = return over the 5 trading days <em>before</em> the signal day
+  (excludes the signal day). Use min/max to bracket the lead-up, e.g. SPY prev-5d
+  <b>max 0</b> finds divergences that fired right after a down week. Stats below update
+  live for the visible rows.
 </div>
 
 <table class="live" id="liveStats">
@@ -380,12 +407,15 @@ The other {len(baseline_dates) - len(signals)} are the control-only days used in
 
 <table id="sig">
 <thead>
-  <tr class="groups"><th></th><th colspan="3">Signal day %</th>
+  <tr class="groups"><th></th>
+    <th class="grpL" colspan="2">Lead-up (prev 5d)</th>
+    <th class="grpD" colspan="3">Signal day %</th>
     <th class="grpS" colspan="{len(HORIZONS)}">SPY forward</th>
     <th class="grpQ" colspan="{len(HORIZONS)}">QQQ forward</th>
     <th class="grpV" colspan="{len(HORIZONS)}">VIX forward</th></tr>
   <tr><th class="sortable">Date</th>
-    <th class="sortable">SPY%</th><th class="sortable">QQQ%</th><th class="sortable">VIX%</th>
+    <th class="sortable grpL">SPY -5d</th><th class="sortable">QQQ -5d</th>
+    <th class="sortable grpD">SPY%</th><th class="sortable">QQQ%</th><th class="sortable">VIX%</th>
     {fwd_th("grpS")}{fwd_th("grpQ")}{fwd_th("grpV")}
   </tr>
 </thead>
@@ -410,24 +440,30 @@ Edge = divergence mean &minus; control mean (positive &rArr; divergence outperfo
 <script>
 const tb = document.querySelector('#sig tbody');
 const allRows = [...tb.rows];
-// column indices: 0=Date 1=SPY% 2=QQQ% 3=VIX% ; then SPY/QQQ/VIX forward blocks
-const FWD = {{ SPY:{list(range(4, 4 + len(HORIZONS)))},
-               QQQ:{list(range(4 + len(HORIZONS), 4 + 2 * len(HORIZONS)))},
-               VIX:{list(range(4 + 2 * len(HORIZONS), 4 + 3 * len(HORIZONS)))} }};
+// column indices: 0=Date 1=SPYprev5 2=QQQprev5 3=SPY% 4=QQQ% 5=VIX% ; then forward blocks
+const FWD = {{ SPY:{list(range(6, 6 + len(HORIZONS)))},
+               QQQ:{list(range(6 + len(HORIZONS), 6 + 2 * len(HORIZONS)))},
+               VIX:{list(range(6 + 2 * len(HORIZONS), 6 + 3 * len(HORIZONS)))} }};
 
 function num(cell) {{ const v = parseFloat(cell.dataset.sort); return isNaN(v) ? null : v; }}
 
 function applyFilters() {{
-  const sMin = parseFloat(document.getElementById('fSpy').value);
-  const qMin = parseFloat(document.getElementById('fQqq').value);
-  const vFell = parseFloat(document.getElementById('fVix').value);  // keep vix > -vFell
+  const v = id => parseFloat(document.getElementById(id).value);
+  const sMin = v('fSpy'), qMin = v('fQqq'), vFell = v('fVix');  // keep vix > -vFell
+  const spMin = v('fSpyPreMin'), spMax = v('fSpyPreMax');
+  const qpMin = v('fQqqPreMin'), qpMax = v('fQqqPreMax');
   let visible = 0;
   for (const r of allRows) {{
-    const spy = num(r.cells[1]), qqq = num(r.cells[2]), vix = num(r.cells[3]);
+    const spy = num(r.cells[3]), qqq = num(r.cells[4]), vix = num(r.cells[5]);
+    const spyPre = num(r.cells[1]), qqqPre = num(r.cells[2]);
     let ok = true;
     if (!isNaN(sMin) && !(spy >= sMin)) ok = false;
     if (!isNaN(qMin) && !(qqq >= qMin)) ok = false;
     if (!isNaN(vFell) && !(vix > -vFell)) ok = false;
+    if (!isNaN(spMin) && !(spyPre !== null && spyPre >= spMin)) ok = false;
+    if (!isNaN(spMax) && !(spyPre !== null && spyPre <= spMax)) ok = false;
+    if (!isNaN(qpMin) && !(qqqPre !== null && qqqPre >= qpMin)) ok = false;
+    if (!isNaN(qpMax) && !(qqqPre !== null && qqqPre <= qpMax)) ok = false;
     r.classList.toggle('hidden', !ok);
     if (ok) visible++;
   }}
@@ -458,10 +494,11 @@ function updateLiveStats() {{
   }}
 }}
 
-['fSpy','fQqq','fVix'].forEach(id =>
+const FILTER_IDS = ['fSpy','fQqq','fVix','fSpyPreMin','fSpyPreMax','fQqqPreMin','fQqqPreMax'];
+FILTER_IDS.forEach(id =>
   document.getElementById(id).addEventListener('input', applyFilters));
 document.getElementById('reset').addEventListener('click', () => {{
-  ['fSpy','fQqq','fVix'].forEach(id => document.getElementById(id).value = '');
+  FILTER_IDS.forEach(id => document.getElementById(id).value = '');
   applyFilters();
 }});
 
